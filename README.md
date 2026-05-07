@@ -19,21 +19,39 @@ coding agent
 
 ### Claude Code
 
-Paste this into a terminal:
+Paste this whole block. It resets stale MCP config, installs the server, creates a fresh demo project, and asks Claude to debug it:
 
 ```bash
+# Install or reset the MCP server at user scope.
 claude mcp remove mcp-debugger -s local 2>/dev/null || true
 claude mcp remove mcp-debugger -s user 2>/dev/null || true
 claude mcp add -s user mcp-debugger -- npx -y github:illscience/mcp-debugger
 claude mcp get mcp-debugger
+
+# Create a disposable demo project.
+rm -rf /tmp/mcp-debugger-claude-verify
+mkdir /tmp/mcp-debugger-claude-verify
+cd /tmp/mcp-debugger-claude-verify
+npx -y github:illscience/mcp-debugger demo-project --target claude .
+ls
+
+# Verify from a normal prompt.
+claude -p "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files."
 ```
 
-You want to see:
+Expected MCP install output includes:
 
 ```text
 Status: ✓ Connected
 Type: stdio
 Command: npx
+```
+
+Expected Claude result:
+
+```text
+The bug is in invoice_total: it subtracts the raw rate 0.15 from 120.0, producing 119.85.
+It should subtract subtotal * rate, producing 102.0.
 ```
 
 The remove commands are intentional. They clear old local or user entries that may point at a stale executable such as `mcp-debugger-server`.
@@ -42,27 +60,30 @@ Claude Code loads project instructions from `./CLAUDE.md` ([Anthropic docs](http
 
 ### Codex
 
-Paste this into a terminal:
+Paste this whole block. It resets stale MCP config, installs the server, creates a fresh demo project, and asks Codex to debug it:
 
 ```bash
 codex mcp remove mcp_debugger 2>/dev/null || true
 codex mcp remove codex-debugger 2>/dev/null || true
 codex mcp add mcp_debugger -- npx -y github:illscience/mcp-debugger
 codex mcp get mcp_debugger
+
+rm -rf /tmp/mcp-debugger-codex-verify
+mkdir /tmp/mcp-debugger-codex-verify
+cd /tmp/mcp-debugger-codex-verify
+npx -y github:illscience/mcp-debugger demo-project --target codex .
+ls
+
+codex exec "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files."
 ```
 
 Codex's MCP config table names are safest with underscores, so the Codex config entry is `mcp_debugger` even though the project and MCP server identify as `mcp-debugger`. The `codex-debugger` remove command clears the old project name if you tried an earlier version.
 
-Then start a fresh Codex session and ask it to debug a reproducible bug:
+Expected Codex result:
 
 ```text
-There is a bug in examples/buggy_discount.py. Figure out what is wrong and propose the fix.
-```
-
-For a direct smoke test:
-
-```text
-Use the mcp-debugger MCP tools to debug examples/buggy_discount.py. Start with debug_python_repro, set a breakpoint at the BREAK_MAIN_CALL line, inspect runtime locals, and explain the bug.
+The bug is in invoice_total: it subtracts the raw rate 0.15 from 120.0, producing 119.85.
+It should subtract subtotal * rate, producing 102.0.
 ```
 
 ## Status
