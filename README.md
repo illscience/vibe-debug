@@ -35,8 +35,9 @@ cd /tmp/mcp-debugger-claude-verify
 npx -y github:illscience/mcp-debugger demo-project --target claude .
 ls
 
-# Verify from a normal prompt.
-claude -p "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files."
+# Verify from a normal prompt with readable live progress.
+claude -p --output-format stream-json --verbose "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files." \
+  | npx -y github:illscience/mcp-debugger claude-progress
 ```
 
 Expected MCP install output includes:
@@ -50,6 +51,10 @@ Command: npx
 Expected Claude result:
 
 ```text
+MCP: mcp-debugger connected
+Tool: mcp-debugger.debug_python_repro (buggy_invoice.py)
+Locals: customer_tier='gold' rate=0.15 subtotal=120.0 total=119.85
+Eval: subtotal * (1 - rate) -> 102.0
 The bug is in invoice_total: it subtracts the raw rate 0.15 from 120.0, producing 119.85.
 It should subtract subtotal * rate, producing 102.0.
 ```
@@ -130,11 +135,12 @@ cd /tmp/mcp-debugger-cleanroom
 npx -y github:illscience/mcp-debugger demo-project --target claude .
 ls
 
-# Ask a normal debugging question.
-claude -p "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files."
+# Ask a normal debugging question and show readable live progress.
+claude -p --output-format stream-json --verbose "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files." \
+  | tee /tmp/mcp-debugger-claude.jsonl \
+  | npx -y github:illscience/mcp-debugger claude-progress
 
-# Optional: save a transcript and grep for MCP/debugger evidence.
-claude -p --output-format stream-json --verbose "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files." | tee /tmp/mcp-debugger-claude.jsonl
+# Optional: grep the raw transcript for MCP/debugger evidence.
 grep -E "mcp__mcp-debugger|debug_python_repro|mcp-debugger" /tmp/mcp-debugger-claude.jsonl
 ```
 

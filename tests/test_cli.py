@@ -7,7 +7,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 
-from mcp_debugger.cli import main
+from mcp_debugger.cli import _format_claude_stream, main
 
 
 def call_cli(args: list[str]) -> tuple[int, str]:
@@ -56,6 +56,98 @@ class CLITests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("codex mcp add mcp_debugger", output)
         self.assertIn("npx -y github:illscience/mcp-debugger", output)
+
+    def test_claude_progress_formats_debugger_events(self) -> None:
+        events = [
+            {
+                "type": "system",
+                "subtype": "init",
+                "cwd": "/tmp/demo",
+                "mcp_servers": [{"name": "mcp-debugger", "status": "connected"}],
+            },
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tool-1",
+                            "name": "mcp__mcp-debugger__debug_python_repro",
+                            "input": {"program": "/tmp/demo/buggy_invoice.py"},
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tool-1",
+                            "content": json.dumps(
+                                {
+                                    "stopped": {
+                                        "location": {
+                                            "name": "invoice_total",
+                                            "line": 13,
+                                            "source": {"path": "/tmp/demo/buggy_invoice.py"},
+                                        }
+                                    },
+                                    "snapshot": {
+                                        "locals": [
+                                            {"name": "subtotal", "value": "120.0"},
+                                            {"name": "rate", "value": "0.15"},
+                                            {"name": "total", "value": "119.85"},
+                                        ]
+                                    },
+                                }
+                            ),
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tool-2",
+                            "name": "mcp__mcp-debugger__debug_evaluate",
+                            "input": {"expression": "subtotal * (1 - rate)"},
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tool-2",
+                            "content": json.dumps(
+                                {
+                                    "expression": "subtotal * (1 - rate)",
+                                    "result": "102.0",
+                                }
+                            ),
+                        }
+                    ]
+                },
+            },
+        ]
+        input_stream = StringIO("\n".join(json.dumps(event) for event in events))
+        output_stream = StringIO()
+
+        self.assertEqual(_format_claude_stream(input_stream, output_stream), 0)
+        output = output_stream.getvalue()
+        self.assertIn("MCP: mcp-debugger connected", output)
+        self.assertIn("Tool: mcp-debugger.debug_python_repro (buggy_invoice.py)", output)
+        self.assertIn("Stopped: buggy_invoice.py:13 in invoice_total", output)
+        self.assertIn("Locals: subtotal=120.0 rate=0.15 total=119.85", output)
+        self.assertIn("Eval: subtotal * (1 - rate) -> 102.0", output)
 
 
 if __name__ == "__main__":

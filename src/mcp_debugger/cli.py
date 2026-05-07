@@ -201,6 +201,200 @@ def _demo_project(target: str, directory: str, force: bool) -> int:
     return 0
 
 
+def _load_json_maybe(value: object) -> object | None:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return None
+
+
+def _debugger_tool_name(name: str) -> str:
+    prefix = "mcp__mcp-debugger__"
+    if name.startswith(prefix):
+        return f"mcp-debugger.{name.removeprefix(prefix)}"
+    return name
+
+
+def _basename(path: object) -> str:
+    if not isinstance(path, str) or not path:
+        return ""
+    return Path(path).name
+
+
+def _format_tool_use(name: str, tool_input: object) -> str:
+    if not isinstance(tool_input, dict):
+        return f"Tool: {_debugger_tool_name(name)}"
+
+    if name.endswith("__debug_python_repro"):
+        program = _basename(tool_input.get("program"))
+        if program:
+            return f"Tool: {_debugger_tool_name(name)} ({program})"
+    if name.endswith("__debug_evaluate"):
+        expression = tool_input.get("expression")
+        if isinstance(expression, str):
+            return f"Tool: {_debugger_tool_name(name)} ({expression})"
+    if name.endswith("__debug_stop"):
+        return f"Tool: {_debugger_tool_name(name)}"
+    if name == "Read":
+        file_path = _basename(tool_input.get("file_path"))
+        if file_path:
+            return f"Tool: Read ({file_path})"
+    if name == "Bash":
+        description = tool_input.get("description")
+        if isinstance(description, str) and description:
+            return f"Tool: Bash ({description})"
+    if name == "ToolSearch":
+        return "Tool: ToolSearch"
+    return f"Tool: {_debugger_tool_name(name)}"
+
+
+def _format_locals(locals_: object) -> str | None:
+    if not isinstance(locals_, list):
+        return None
+    values: list[str] = []
+    for item in locals_:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        value = item.get("value")
+        if isinstance(name, str) and isinstance(value, str):
+            values.append(f"{name}={value}")
+    if not values:
+        return None
+    return "Locals: " + " ".join(values)
+
+
+def _format_debugger_result(payload: object, tool_name: str | None) -> list[str]:
+    data = _load_json_maybe(payload)
+    if not isinstance(data, dict):
+        return []
+
+    lines: list[str] = []
+    stopped = data.get("stopped")
+    if isinstance(stopped, dict):
+        location = stopped.get("location")
+        if isinstance(location, dict):
+            source = location.get("source")
+            file_name = ""
+            if isinstance(source, dict):
+                file_name = _basename(source.get("path"))
+            name = location.get("name")
+            line = location.get("line")
+            if isinstance(name, str) and isinstance(line, int):
+                prefix = f"{file_name}:" if file_name else ""
+                lines.append(f"Stopped: {prefix}{line} in {name}")
+
+    snapshot = data.get("snapshot")
+    if isinstance(snapshot, dict):
+        locals_line = _format_locals(snapshot.get("locals"))
+        if locals_line:
+            lines.append(locals_line)
+
+    expression = data.get("expression")
+    result = data.get("result")
+    if isinstance(expression, str) and isinstance(result, str):
+        lines.append(f"Eval: {expression} -> {result}")
+
+    state = data.get("state")
+    if tool_name and tool_name.endswith("__debug_stop") and isinstance(state, str):
+        lines.append(f"Debug session: {state}")
+
+    error = data.get("error")
+    if isinstance(error, str):
+        lines.append(f"Tool error: {error}")
+
+    return lines
+
+
+def _message_content_items(event: dict[str, object]) -> list[dict[str, object]]:
+    message = event.get("message")
+    if not isinstance(message, dict):
+        return []
+    content = message.get("content")
+    if not isinstance(content, list):
+        return []
+    return [item for item in content if isinstance(item, dict)]
+
+
+def _format_claude_stream(input_stream, output_stream) -> int:
+    tool_names: dict[str, str] = {}
+
+    for raw_line in input_stream:
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            print(line, file=output_stream, flush=True)
+            continue
+        if not isinstance(event, dict):
+            continue
+
+        event_type = event.get("type")
+        if event_type == "system" and event.get("subtype") == "init":
+            cwd = event.get("cwd")
+            if isinstance(cwd, str):
+                print(f"Working directory: {cwd}", file=output_stream, flush=True)
+            mcp_servers = event.get("mcp_servers")
+            if isinstance(mcp_servers, list):
+                for server in mcp_servers:
+                    if not isinstance(server, dict) or server.get("name") != "mcp-debugger":
+                        continue
+                    print(f"MCP: mcp-debugger {server.get('status')}", file=output_stream, flush=True)
+            continue
+
+        if event_type == "assistant":
+            for item in _message_content_items(event):
+                content_type = item.get("type")
+                if content_type == "text":
+                    text = item.get("text")
+                    if isinstance(text, str) and text.strip():
+                        print(text.strip(), file=output_stream, flush=True)
+                elif content_type == "tool_use":
+                    tool_id = item.get("id")
+                    name = item.get("name")
+                    if isinstance(tool_id, str) and isinstance(name, str):
+                        tool_names[tool_id] = name
+                    if isinstance(name, str):
+                        print(_format_tool_use(name, item.get("input")), file=output_stream, flush=True)
+            continue
+
+        if event_type == "user":
+            for item in _message_content_items(event):
+                if item.get("type") != "tool_result":
+                    continue
+                tool_id = item.get("tool_use_id")
+                tool_name = tool_names.get(tool_id) if isinstance(tool_id, str) else None
+                if item.get("is_error"):
+                    print(f"Tool error from {_debugger_tool_name(tool_name or 'unknown')}", file=output_stream, flush=True)
+                content = item.get("content")
+                if isinstance(content, list):
+                    if tool_name == "ToolSearch":
+                        print("Debugger tools loaded", file=output_stream, flush=True)
+                    continue
+                for formatted in _format_debugger_result(content, tool_name):
+                    print(formatted, file=output_stream, flush=True)
+            continue
+
+        if event_type == "result":
+            subtype = event.get("subtype")
+            duration_ms = event.get("duration_ms")
+            turns = event.get("num_turns")
+            summary: list[str] = [f"Done: {subtype}"] if isinstance(subtype, str) else ["Done"]
+            if isinstance(turns, int):
+                summary.append(f"{turns} turns")
+            if isinstance(duration_ms, int):
+                summary.append(f"{duration_ms / 1000:.1f}s")
+            print(" | ".join(summary), file=output_stream, flush=True)
+
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Utilities for the mcp-debugger MCP server.")
     parser.add_argument("--version", action="version", version=f"mcp-debugger {__version__}")
@@ -219,6 +413,7 @@ def main(argv: list[str] | None = None) -> int:
     demo.add_argument("directory", nargs="?", default=".")
     demo.add_argument("--target", choices=["claude", "codex", "both"], default="claude")
     demo.add_argument("--force", action="store_true")
+    subparsers.add_parser("claude-progress", help="Format Claude Code stream-json output for humans.")
 
     args = parser.parse_args(argv)
     if args.command == "doctor":
@@ -235,6 +430,8 @@ def main(argv: list[str] | None = None) -> int:
         return _init_agent_files(args.target, args.directory, args.force)
     if args.command == "demo-project":
         return _demo_project(args.target, args.directory, args.force)
+    if args.command == "claude-progress":
+        return _format_claude_stream(sys.stdin, sys.stdout)
     parser.error(f"unknown command: {args.command}")
     return 2
 
