@@ -21,10 +21,34 @@ This is an alpha release focused on Python via [`debugpy`](https://github.com/mi
 
 ## Quick Start
 
+### Fastest Trial With `uvx`
+
+If you have [`uv`](https://docs.astral.sh/uv/) installed, you can run the debugger without first putting `mcp-debugger` on your shell `PATH`:
+
+```bash
+uvx --from git+https://github.com/illscience/mcp-debugger.git mcp-debugger doctor
+```
+
+You can also register the MCP server this way:
+
+```bash
+claude mcp add -s user mcp-debugger -- uvx --from git+https://github.com/illscience/mcp-debugger.git mcp-debugger-server
+```
+
+### Persistent Install With `pipx`
+
 Install from GitHub:
 
 ```bash
 pipx install git+https://github.com/illscience/mcp-debugger.git
+pipx ensurepath
+```
+
+Open a new terminal, or reload your shell, then verify both console scripts are available:
+
+```bash
+command -v mcp-debugger
+command -v mcp-debugger-server
 ```
 
 Or install locally from a checkout:
@@ -97,13 +121,19 @@ Use the mcp-debugger MCP tools to debug examples/buggy_discount.py. Start with d
 
 ## Add It To Claude Code
 
-If installed with `pipx`:
+For the quickest trial, register the server through `uvx`. This does not require `mcp-debugger` or `mcp-debugger-server` to be on your shell `PATH`:
+
+```bash
+claude mcp add -s user mcp-debugger -- uvx --from git+https://github.com/illscience/mcp-debugger.git mcp-debugger-server
+```
+
+If installed with `pipx`, either use:
 
 ```bash
 claude mcp add -s user mcp-debugger -- mcp-debugger-server
 ```
 
-Or print the command:
+or print an install command that uses the resolved absolute path for your current environment:
 
 ```bash
 mcp-debugger install-snippet claude
@@ -154,12 +184,20 @@ mcp-debugger install-snippet json
 
 This is the fastest way to prove the MCP works the way people will actually use it: from a normal bug-fixing prompt, not from a Python test script and not by explicitly telling the agent which debugger tool to call.
 
-Start in a fresh directory after installing the MCP:
+First make sure Claude Code has the MCP server registered at user scope:
+
+```bash
+claude mcp add -s user mcp-debugger -- uvx --from git+https://github.com/illscience/mcp-debugger.git mcp-debugger-server
+claude mcp get mcp-debugger
+```
+
+Start in a fresh directory and create the demo files before asking Claude to debug them:
 
 ```bash
 mkdir /tmp/mcp-debugger-cleanroom
 cd /tmp/mcp-debugger-cleanroom
-mcp-debugger demo-project --target claude .
+uvx --from git+https://github.com/illscience/mcp-debugger.git mcp-debugger demo-project --target claude .
+ls
 ```
 
 That creates:
@@ -167,11 +205,19 @@ That creates:
 - `buggy_invoice.py`: a tiny Python program with a real arithmetic bug.
 - `CLAUDE.md`: Claude Code project memory that says to use live runtime debugging when a Python bug is reproducible.
 
+If you prefer a persistent install and `mcp-debugger` is on your `PATH`, this equivalent command also works:
+
+```bash
+mcp-debugger demo-project --target claude .
+```
+
 Run a natural prompt:
 
 ```bash
 claude -p "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files."
 ```
+
+If Claude says the directory is empty, the demo project was not created in the directory where you ran Claude. Run `pwd` and `ls`; `buggy_invoice.py` and `CLAUDE.md` should both be present before the prompt.
 
 To prove from the transcript that Claude used the MCP debugger, run the same prompt in stream-json mode:
 
