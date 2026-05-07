@@ -64,7 +64,7 @@ def _mcp_command() -> list[str]:
     return ["mcp-debugger-server"]
 
 
-def _doctor() -> int:
+def _doctor_report() -> dict[str, object]:
     checks: list[dict[str, object]] = []
 
     try:
@@ -110,7 +110,46 @@ def _doctor() -> int:
         "checks": checks,
         "ok": all(bool(check["ok"]) for check in checks),
     }
-    print(json.dumps(report, indent=2))
+    return report
+
+
+def _print_doctor_human(report: dict[str, object], quiet: bool) -> None:
+    checks = report.get("checks")
+    ok = bool(report.get("ok"))
+
+    if quiet:
+        status = "ok" if ok else "failed"
+        print(f"{report.get('name', 'mcp-debugger')}: {status}")
+        return
+
+    print(f"{report.get('name', 'mcp-debugger')} {report.get('version', 'unknown')}")
+    print(f"Python: {report.get('python', 'unknown')}")
+
+    if not isinstance(checks, list):
+        print("Checks: failed")
+        return
+
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        name = check.get("name", "check")
+        if check.get("ok"):
+            print(f"{name}: ok")
+            continue
+
+        detail = check.get("error") or check.get("stderr") or check.get("stdout")
+        if isinstance(detail, str) and detail:
+            print(f"{name}: failed - {detail}")
+        else:
+            print(f"{name}: failed")
+
+
+def _doctor(json_output: bool = False, quiet: bool = False) -> int:
+    report = _doctor_report()
+    if json_output:
+        print(json.dumps(report, indent=2))
+    else:
+        _print_doctor_human(report, quiet=quiet)
     return 0 if report["ok"] else 1
 
 
@@ -436,7 +475,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"mcp-debugger {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("doctor", help="Verify debugpy and the MCP server entry point.")
+    doctor = subparsers.add_parser("doctor", help="Verify debugpy and the MCP server entry point.")
+    doctor.add_argument("--json", action="store_true", help="Print the full machine-readable report.")
+    doctor.add_argument("--quiet", action="store_true", help="Print only one status line.")
     instructions = subparsers.add_parser("agent-instructions", help="Print recommended agent guidance.")
     instructions.add_argument("--target", choices=["generic", "claude", "codex"], default="generic")
     install = subparsers.add_parser("install-snippet", help="Print an MCP install command or config snippet.")
@@ -453,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.command == "doctor":
-        return _doctor()
+        return _doctor(json_output=args.json, quiet=args.quiet)
     if args.command == "agent-instructions":
         if args.target == "generic":
             print(AGENT_USAGE_GUIDANCE)

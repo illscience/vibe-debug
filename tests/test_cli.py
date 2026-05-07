@@ -18,6 +18,30 @@ def call_cli(args: list[str]) -> tuple[int, str]:
 
 
 class CLITests(unittest.TestCase):
+    def test_doctor_defaults_to_human_output(self) -> None:
+        code, output = call_cli(["doctor"])
+
+        self.assertEqual(code, 0)
+        self.assertIn("mcp-debugger", output)
+        self.assertIn("debugpy import: ok", output)
+        self.assertIn("MCP initialize: ok", output)
+        self.assertNotIn('"checks"', output)
+
+    def test_doctor_json_keeps_machine_readable_report(self) -> None:
+        code, output = call_cli(["doctor", "--json"])
+
+        self.assertEqual(code, 0)
+        payload = json.loads(output)
+        self.assertEqual(payload["name"], "mcp-debugger")
+        self.assertTrue(payload["ok"])
+        self.assertIsInstance(payload["checks"], list)
+
+    def test_doctor_quiet_prints_one_status_line(self) -> None:
+        code, output = call_cli(["doctor", "--quiet"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(output, "mcp-debugger: ok\n")
+
     def test_demo_project_writes_claude_memory_and_bug(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             code, output = call_cli(["demo-project", directory, "--target", "claude"])

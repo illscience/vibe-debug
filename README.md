@@ -42,6 +42,15 @@ ls
 claude -p --output-format stream-json --verbose "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files." | npx -y github:illscience/mcp-debugger claude-progress
 ```
 
+Expected doctor output:
+
+```text
+mcp-debugger 0.1.3
+Python: ...
+debugpy import: ok
+MCP initialize: ok
+```
+
 Expected MCP install output includes:
 
 ```text
@@ -185,6 +194,12 @@ codex exec "There is a bug in buggy_invoice.py. Figure out what is wrong and pro
 ```
 
 The key proof is the transcript: the agent should use debugger tools from a normal debugging request and cite observed runtime state in its answer.
+
+For the full machine-readable health report, run:
+
+```bash
+npx -y github:illscience/mcp-debugger doctor --json
+```
 
 ## What The Agent Sees
 
