@@ -149,6 +149,37 @@ class CLITests(unittest.TestCase):
         self.assertIn("Locals: subtotal=120.0 rate=0.15 total=119.85", output)
         self.assertIn("Eval: subtotal * (1 - rate) -> 102.0", output)
 
+    def test_claude_progress_treats_pending_mcp_as_starting_until_tool_use(self) -> None:
+        events = [
+            {
+                "type": "system",
+                "subtype": "init",
+                "cwd": "/tmp/demo",
+                "mcp_servers": [{"name": "mcp-debugger", "status": "pending"}],
+            },
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tool-1",
+                            "name": "mcp__mcp-debugger__debug_python_repro",
+                            "input": {"program": "/tmp/demo/buggy_invoice.py"},
+                        }
+                    ]
+                },
+            },
+        ]
+        input_stream = StringIO("\n".join(json.dumps(event) for event in events))
+        output_stream = StringIO()
+
+        self.assertEqual(_format_claude_stream(input_stream, output_stream), 0)
+        output = output_stream.getvalue()
+        self.assertIn("MCP: mcp-debugger starting", output)
+        self.assertIn("MCP: mcp-debugger active", output)
+        self.assertNotIn("MCP: mcp-debugger pending", output)
+
     def test_claude_progress_suppresses_transient_retried_tool_error(self) -> None:
         events = [
             {

@@ -323,6 +323,8 @@ def _message_content_items(event: dict[str, object]) -> list[dict[str, object]]:
 def _format_claude_stream(input_stream, output_stream) -> int:
     tool_names: dict[str, str] = {}
     pending_tool_errors: dict[str, list[str]] = {}
+    mcp_debugger_status: str | None = None
+    mcp_debugger_active_printed = False
 
     def flush_tool_errors(tool_name: str | None = None) -> None:
         names = [tool_name] if tool_name else list(pending_tool_errors)
@@ -355,7 +357,13 @@ def _format_claude_stream(input_stream, output_stream) -> int:
                 for server in mcp_servers:
                     if not isinstance(server, dict) or server.get("name") != "mcp-debugger":
                         continue
-                    print(f"MCP: mcp-debugger {server.get('status')}", file=output_stream, flush=True)
+                    status = server.get("status")
+                    if isinstance(status, str):
+                        mcp_debugger_status = status
+                        display_status = "starting" if status == "pending" else status
+                    else:
+                        display_status = "unknown"
+                    print(f"MCP: mcp-debugger {display_status}", file=output_stream, flush=True)
             continue
 
         if event_type == "assistant":
@@ -372,6 +380,13 @@ def _format_claude_stream(input_stream, output_stream) -> int:
                     if isinstance(tool_id, str) and isinstance(name, str):
                         tool_names[tool_id] = name
                     if isinstance(name, str):
+                        if (
+                            name.startswith("mcp__mcp-debugger__")
+                            and mcp_debugger_status != "connected"
+                            and not mcp_debugger_active_printed
+                        ):
+                            print("MCP: mcp-debugger active", file=output_stream, flush=True)
+                            mcp_debugger_active_printed = True
                         print(_format_tool_use(name, item.get("input")), file=output_stream, flush=True)
             continue
 

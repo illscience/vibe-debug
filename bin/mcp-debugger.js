@@ -98,6 +98,49 @@ function venvPython(venvDir) {
   return path.join(venvDir, "bin", "python");
 }
 
+function isReady(readyFile, pythonPath, sourceDir) {
+  return fs.existsSync(readyFile) && fs.existsSync(pythonPath) && fs.existsSync(sourcePath(sourceDir));
+}
+
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function acquireInstallLock(lockDir) {
+  const startedAt = Date.now();
+  const staleAfterMs = 5 * 60 * 1000;
+  const timeoutMs = 2 * 60 * 1000;
+
+  fs.mkdirSync(path.dirname(lockDir), { recursive: true });
+
+  while (true) {
+    try {
+      fs.mkdirSync(lockDir);
+      return () => fs.rmSync(lockDir, { recursive: true, force: true });
+    } catch (error) {
+      if (!error || error.code !== "EEXIST") {
+        throw error;
+      }
+
+      try {
+        const stat = fs.statSync(lockDir);
+        if (Date.now() - stat.mtimeMs > staleAfterMs) {
+          fs.rmSync(lockDir, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+        continue;
+      }
+
+      if (Date.now() - startedAt > timeoutMs) {
+        console.error(`Timed out waiting for the mcp-debugger install lock: ${lockDir}`);
+        process.exit(1);
+      }
+      sleep(100);
+    }
+  }
+}
+
 function sourcePath(sourceDir) {
   return path.join(sourceDir, "src");
 }
@@ -199,29 +242,38 @@ function ensureVenv() {
   const readyFile = path.join(venvDir, ".ready");
   const pythonPath = venvPython(venvDir);
 
-  if (fs.existsSync(readyFile) && fs.existsSync(pythonPath) && fs.existsSync(sourcePath(sourceDir))) {
+  if (isReady(readyFile, pythonPath, sourceDir)) {
     return { pythonPath, sourceDir };
   }
 
-  fs.rmSync(venvDir, { recursive: true, force: true });
-  fs.mkdirSync(path.dirname(venvDir), { recursive: true });
+  const releaseLock = acquireInstallLock(`${venvDir}.lock`);
+  try {
+    if (isReady(readyFile, pythonPath, sourceDir)) {
+      return { pythonPath, sourceDir };
+    }
 
-  const python = findPython();
-  runSetup(
-    python.command,
-    [...python.args, "-m", "venv", venvDir],
-    "Failed to create the mcp-debugger Python environment.",
-  );
+    fs.rmSync(venvDir, { recursive: true, force: true });
+    fs.mkdirSync(path.dirname(venvDir), { recursive: true });
 
-  prepareInstallSource(sourceDir);
-  runSetup(
-    pythonPath,
-    ["-m", "pip", "--disable-pip-version-check", "install", "debugpy>=1.8.0"],
-    "Failed to install the Python debugger backend.",
-  );
+    const python = findPython();
+    runSetup(
+      python.command,
+      [...python.args, "-m", "venv", venvDir],
+      "Failed to create the mcp-debugger Python environment.",
+    );
 
-  fs.writeFileSync(readyFile, `${cacheKey}\n`, "utf8");
-  return { pythonPath, sourceDir };
+    prepareInstallSource(sourceDir);
+    runSetup(
+      pythonPath,
+      ["-m", "pip", "--disable-pip-version-check", "install", "debugpy>=1.8.0"],
+      "Failed to install the Python debugger backend.",
+    );
+
+    fs.writeFileSync(readyFile, `${cacheKey}\n`, "utf8");
+    return { pythonPath, sourceDir };
+  } finally {
+    releaseLock();
+  }
 }
 
 function main() {

@@ -22,6 +22,9 @@ coding agent
 Paste this whole block. It resets stale MCP config, installs the server, creates a fresh demo project, and asks Claude to debug it:
 
 ```bash
+# Warm and verify the npx package once so Claude's status check does not race first-run setup.
+npx -y github:illscience/mcp-debugger doctor
+
 # Install or reset the MCP server at user scope.
 claude mcp remove mcp-debugger -s local 2>/dev/null || true
 claude mcp remove mcp-debugger -s user 2>/dev/null || true
@@ -47,13 +50,17 @@ Type: stdio
 Command: npx
 ```
 
+If `claude mcp get` reports `Failed to connect` on a totally cold first run, run the prompt anyway or re-run `claude mcp get` after the first prompt. The GitHub `npx` install has to fetch the repo and create a small Python/debugpy cache, and Claude's status probe can occasionally time out before that setup finishes. The authoritative proof is the prompt transcript: if you see `Tool: mcp-debugger.debug_python_repro` and live locals, the MCP worked.
+
 Expected Claude result:
 
 ```text
 MCP: mcp-debugger connected
+# On a cold first run you may instead see:
+MCP: mcp-debugger starting
+MCP: mcp-debugger active
 Tool: mcp-debugger.debug_python_repro (buggy_invoice.py)
 Locals: customer_tier='gold' rate=0.15 subtotal=120.0 total=119.85
-Eval: subtotal * (1 - rate) -> 102.0
 The bug is in invoice_total: it subtracts the raw rate 0.15 from 120.0, producing 119.85.
 It should subtract subtotal * rate, producing 102.0.
 ```
@@ -67,6 +74,8 @@ Claude Code loads project instructions from `./CLAUDE.md` ([Anthropic docs](http
 Paste this whole block. It resets stale MCP config, installs the server, creates a fresh demo project, and asks Codex to debug it:
 
 ```bash
+npx -y github:illscience/mcp-debugger doctor
+
 codex mcp remove mcp_debugger 2>/dev/null || true
 codex mcp remove codex-debugger 2>/dev/null || true
 codex mcp add mcp_debugger -- npx -y github:illscience/mcp-debugger
@@ -121,6 +130,9 @@ This is the fastest way to prove the MCP works the way people will actually use 
 For Claude Code, paste this whole block:
 
 ```bash
+# Warm and verify the npx package once so Claude's status check does not race first-run setup.
+npx -y github:illscience/mcp-debugger doctor
+
 # Install or reset the MCP server at user scope.
 claude mcp remove mcp-debugger -s local 2>/dev/null || true
 claude mcp remove mcp-debugger -s user 2>/dev/null || true
@@ -146,7 +158,7 @@ The `demo-project` command creates:
 - `buggy_invoice.py`: a tiny Python program with a real arithmetic bug.
 - `CLAUDE.md`: Claude Code project memory that says to use live runtime debugging when a reproducible bug has observable runtime state.
 
-You should see `mcp-debugger` listed as connected and, on a successful debugger-assisted run, a tool call such as `mcp__mcp-debugger__debug_python_repro`.
+You should see `mcp-debugger` listed as connected, starting, or active and, on a successful debugger-assisted run, a tool call such as `mcp__mcp-debugger__debug_python_repro`.
 
 What you want to see:
 
@@ -158,6 +170,8 @@ What you want to see:
 You can run the same clean-room prompt test with Codex:
 
 ```bash
+npx -y github:illscience/mcp-debugger doctor
+
 codex mcp remove mcp_debugger 2>/dev/null || true
 codex mcp remove codex-debugger 2>/dev/null || true
 codex mcp add mcp_debugger -- npx -y github:illscience/mcp-debugger
@@ -228,6 +242,7 @@ Expected output:
     "debug_step out",
     "debug_step over",
     "debug_evaluate",
+    "debug_evaluate default top frame",
     "debug_continue to exit"
   ],
   "bugEvidence": {
