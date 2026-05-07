@@ -15,110 +15,25 @@ coding agent
   -> your app
 ```
 
-## Install + Verify
+## Install
 
 ### Claude Code
 
-Paste this whole block. It resets stale MCP config, installs the server, creates a fresh demo project, and asks Claude to debug it:
-
 ```bash
-# Warm and verify the npx package once so Claude's status check does not race first-run setup.
-npx -y github:illscience/mcp-debugger doctor
-
-# Install or reset the MCP server at user scope.
-claude mcp remove mcp-debugger -s local 2>/dev/null || true
-claude mcp remove mcp-debugger -s user 2>/dev/null || true
 claude mcp add -s user mcp-debugger -- npx -y github:illscience/mcp-debugger
-claude mcp get mcp-debugger
-
-# Create a disposable demo project.
-rm -rf /tmp/mcp-debugger-claude-verify
-mkdir /tmp/mcp-debugger-claude-verify
-cd /tmp/mcp-debugger-claude-verify
-npx -y github:illscience/mcp-debugger demo-project --target claude .
-ls
-
-# Verify from a normal prompt with readable live progress.
-claude -p --output-format stream-json --verbose "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files." | npx -y github:illscience/mcp-debugger claude-progress
 ```
-
-Expected doctor output:
-
-```text
-mcp-debugger 0.1.3
-Python: ...
-debugpy import: ok
-MCP initialize: ok
-```
-
-Expected MCP install output includes:
-
-```text
-Status: ✓ Connected
-Type: stdio
-Command: npx
-```
-
-If `claude mcp get` reports `Failed to connect` on a totally cold first run, run the prompt anyway or re-run `claude mcp get` after the first prompt. The GitHub `npx` install has to fetch the repo and create a small Python/debugpy cache, and Claude's status probe can occasionally time out before that setup finishes. The authoritative proof is the prompt transcript: if you see `Tool: mcp-debugger.debug_python_repro` and live locals, the MCP worked.
-
-Expected Claude result:
-
-```text
-MCP: mcp-debugger connected
-# On a cold first run you may instead see:
-MCP: mcp-debugger starting
-MCP: mcp-debugger active
-Tool: mcp-debugger.debug_python_repro (buggy_invoice.py)
-Locals: customer_tier='gold' rate=0.15 subtotal=120.0 total=119.85
-The bug is in invoice_total: it subtracts the raw rate 0.15 from 120.0, producing 119.85.
-It should subtract subtotal * rate, producing 102.0.
-```
-
-The remove commands are intentional. They clear old local or user entries that may point at a stale executable such as `mcp-debugger-server`.
-
-Claude Code loads project instructions from `./CLAUDE.md` ([Anthropic docs](https://docs.anthropic.com/en/docs/claude-code/memory)). `mcp-debugger` can create that file for you in a test project; see the clean-room test below.
 
 ### Codex
 
-Paste this whole block. It resets stale MCP config, installs the server, creates a fresh demo project, and asks Codex to debug it:
-
 ```bash
-npx -y github:illscience/mcp-debugger doctor
-
-codex mcp remove mcp_debugger 2>/dev/null || true
-codex mcp remove codex-debugger 2>/dev/null || true
 codex mcp add mcp_debugger -- npx -y github:illscience/mcp-debugger
-codex mcp get mcp_debugger
-
-rm -rf /tmp/mcp-debugger-codex-verify
-mkdir /tmp/mcp-debugger-codex-verify
-cd /tmp/mcp-debugger-codex-verify
-npx -y github:illscience/mcp-debugger demo-project --target codex .
-ls
-
-codex exec "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files."
 ```
 
-Codex's MCP config table names are safest with underscores, so the Codex config entry is `mcp_debugger` even though the project and MCP server identify as `mcp-debugger`. The `codex-debugger` remove command clears the old project name if you tried an earlier version.
+Codex's MCP config table names are safest with underscores, so the Codex config entry is `mcp_debugger` even though the project and MCP server identify as `mcp-debugger`.
 
-Expected Codex result:
+### Other MCP Clients
 
-```text
-The bug is in invoice_total: it subtracts the raw rate 0.15 from 120.0, producing 119.85.
-It should subtract subtotal * rate, producing 102.0.
-```
-
-## Status
-
-This is an alpha release. The first debugger backend is Python via [`debugpy`](https://github.com/microsoft/debugpy); the MCP server is designed to grow to TypeScript/Node and other language runtimes.
-
-The npm package name in this repository is `@illscience/mcp-debugger`. Until it is published to npm, the install commands use `npx -y github:illscience/mcp-debugger`. After publishing, that can become:
-
-```bash
-npx -y @illscience/mcp-debugger
-```
-
-## Generic MCP Config
+Use this stdio server config:
 
 ```json
 {
@@ -132,40 +47,79 @@ npx -y @illscience/mcp-debugger
 }
 ```
 
-## Clean-Room Prompt Test
+### Health Check
 
-This is the fastest way to prove the MCP works the way people will actually use it: from a normal bug-fixing prompt, not from a Python test script and not by explicitly telling the agent which debugger tool to call.
-
-For Claude Code, paste this whole block:
+The MCP server uses a small Python/debugpy cache behind the `npx` wrapper. Warm and verify it with:
 
 ```bash
-# Warm and verify the npx package once so Claude's status check does not race first-run setup.
+npx -y github:illscience/mcp-debugger doctor
+```
+
+Expected output:
+
+```text
+mcp-debugger 0.1.3
+Python: ...
+debugpy import: ok
+MCP initialize: ok
+```
+
+For the full machine-readable report, run `npx -y github:illscience/mcp-debugger doctor --json`.
+
+### Disable
+
+MCP tools are visible to the agent while the server is enabled. If you only want debugger tools for a specific project or debugging session, remove the MCP entry when you are done:
+
+```bash
+claude mcp remove mcp-debugger -s user
+codex mcp remove mcp_debugger
+```
+
+## Status
+
+This is an alpha release. The first debugger backend is Python via [`debugpy`](https://github.com/microsoft/debugpy); the MCP server is designed to grow to TypeScript/Node and other language runtimes.
+
+The npm package name in this repository is `@illscience/mcp-debugger`. Until it is published to npm, the install commands use `npx -y github:illscience/mcp-debugger`. After publishing, that can become:
+
+```bash
+npx -y @illscience/mcp-debugger
+```
+
+## Optional Clean-Room Test
+
+This proves the MCP works the way people actually use it: from a normal bug-fixing prompt, not from a Python test script and not by explicitly telling the agent which debugger tool to call.
+
+### Claude Code
+
+Paste this block:
+
+```bash
 npx -y github:illscience/mcp-debugger doctor
 
-# Install or reset the MCP server at user scope.
-claude mcp remove mcp-debugger -s local 2>/dev/null || true
-claude mcp remove mcp-debugger -s user 2>/dev/null || true
 claude mcp add -s user mcp-debugger -- npx -y github:illscience/mcp-debugger
 claude mcp get mcp-debugger
 
-# Create a fresh demo project.
-rm -rf /tmp/mcp-debugger-cleanroom
-mkdir /tmp/mcp-debugger-cleanroom
-cd /tmp/mcp-debugger-cleanroom
+rm -rf /tmp/mcp-debugger-claude-verify
+mkdir /tmp/mcp-debugger-claude-verify
+cd /tmp/mcp-debugger-claude-verify
 npx -y github:illscience/mcp-debugger demo-project --target claude .
-ls
 
-# Ask a normal debugging question and show readable live progress.
-claude -p --output-format stream-json --verbose "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files." | tee /tmp/mcp-debugger-claude.jsonl | npx -y github:illscience/mcp-debugger claude-progress
+claude -p --output-format stream-json --verbose "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files." | npx -y github:illscience/mcp-debugger claude-progress
+```
 
-# Optional: grep the raw transcript for MCP/debugger evidence.
-grep -E "mcp__mcp-debugger|debug_python_repro|mcp-debugger" /tmp/mcp-debugger-claude.jsonl
+If you previously installed an old version, reset first:
+
+```bash
+claude mcp remove mcp-debugger -s local 2>/dev/null || true
+claude mcp remove mcp-debugger -s user 2>/dev/null || true
 ```
 
 The `demo-project` command creates:
 
 - `buggy_invoice.py`: a tiny Python program with a real arithmetic bug.
 - `CLAUDE.md`: Claude Code project memory that says to use live runtime debugging when a reproducible bug has observable runtime state.
+
+Claude Code loads project instructions from `./CLAUDE.md` ([Anthropic docs](https://docs.anthropic.com/en/docs/claude-code/memory)). `mcp-debugger` can create that file for you in a test project, as shown above.
 
 You should see `mcp-debugger` listed as connected, starting, or active and, on a successful debugger-assisted run, a tool call such as `mcp__mcp-debugger__debug_python_repro`.
 
@@ -176,13 +130,11 @@ What you want to see:
 - Claude explains that the program subtracts `0.15` directly instead of subtracting `120.0 * 0.15`.
 - Claude proposes `total = subtotal * (1 - rate)` or `total = subtotal - (subtotal * rate)`.
 
-You can run the same clean-room prompt test with Codex:
+### Codex
 
 ```bash
 npx -y github:illscience/mcp-debugger doctor
 
-codex mcp remove mcp_debugger 2>/dev/null || true
-codex mcp remove codex-debugger 2>/dev/null || true
 codex mcp add mcp_debugger -- npx -y github:illscience/mcp-debugger
 codex mcp get mcp_debugger
 
@@ -193,13 +145,14 @@ npx -y github:illscience/mcp-debugger demo-project --target codex .
 codex exec "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files."
 ```
 
-The key proof is the transcript: the agent should use debugger tools from a normal debugging request and cite observed runtime state in its answer.
-
-For the full machine-readable health report, run:
+If you previously tried an old version, reset first:
 
 ```bash
-npx -y github:illscience/mcp-debugger doctor --json
+codex mcp remove mcp_debugger 2>/dev/null || true
+codex mcp remove codex-debugger 2>/dev/null || true
 ```
+
+The key proof is the transcript: the agent should use debugger tools from a normal debugging request and cite observed runtime state in its answer.
 
 ## What The Agent Sees
 
@@ -351,6 +304,7 @@ Build a wheel:
 - `debug_pytest_failure`: run a failing pytest test under the debugger automatically.
 - Breakpoints by function name, symbol, marker comment, or exception type.
 - Richer first-stop summaries with surrounding source and suggested next debugger actions.
+- Agent-optimized CLI commands, with MCP as a thin wrapper for clients that prefer tools over shell commands.
 - Node.js / Next.js support through the Node inspector or Chrome DevTools Protocol.
 
 ## License
