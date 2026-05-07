@@ -240,6 +240,15 @@ def main() -> int:
         assert buggy_value["result"] == "119.85", buggy_value
         assert correct_value["result"] == "102.0", correct_value
 
+        default_frame_value = client.call_tool(
+            "debug_evaluate",
+            {
+                "sessionId": session_id,
+                "expression": "round(price * (1 - rate), 2)",
+            },
+        )
+        assert default_frame_value["result"] == "102.0", default_frame_value
+
         finished = client.call_tool("debug_continue", {"sessionId": session_id, "timeout": 20}, timeout=40)
         assert finished["state"] in {"exited", "terminated"}, finished
         client.call_tool("debug_stop", {"sessionId": session_id})
@@ -312,11 +321,12 @@ def main() -> int:
                         "debug_continue to breakpoint",
                         "debug_step into",
                         "debug_scopes/debug_variables locals",
-                        "debug_step out",
-                        "debug_step over",
-                        "debug_evaluate",
-                        "debug_continue to exit",
-                    ],
+            "debug_step out",
+            "debug_step over",
+            "debug_evaluate",
+            "debug_evaluate default top frame",
+            "debug_continue to exit",
+        ],
                     "bugEvidence": {
                         "runtimeBuggyExpression": buggy_value["result"],
                         "runtimeExpectedExpression": correct_value["result"],

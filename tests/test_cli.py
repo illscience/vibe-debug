@@ -149,6 +149,68 @@ class CLITests(unittest.TestCase):
         self.assertIn("Locals: subtotal=120.0 rate=0.15 total=119.85", output)
         self.assertIn("Eval: subtotal * (1 - rate) -> 102.0", output)
 
+    def test_claude_progress_suppresses_transient_retried_tool_error(self) -> None:
+        events = [
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tool-1",
+                            "name": "mcp__mcp-debugger__debug_evaluate",
+                            "input": {"expression": "subtotal * (1 - rate)"},
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tool-1",
+                            "is_error": True,
+                            "content": json.dumps({"error": "NameError: name 'subtotal' is not defined"}),
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tool-2",
+                            "name": "mcp__mcp-debugger__debug_evaluate",
+                            "input": {"expression": "subtotal * (1 - rate)", "frameId": 2},
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tool-2",
+                            "content": json.dumps({"expression": "subtotal * (1 - rate)", "result": "102.0"}),
+                        }
+                    ]
+                },
+            },
+        ]
+        input_stream = StringIO("\n".join(json.dumps(event) for event in events))
+        output_stream = StringIO()
+
+        self.assertEqual(_format_claude_stream(input_stream, output_stream), 0)
+        output = output_stream.getvalue()
+        self.assertNotIn("Tool error", output)
+        self.assertIn("Eval: subtotal * (1 - rate) -> 102.0", output)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -322,6 +322,16 @@ def _message_content_items(event: dict[str, object]) -> list[dict[str, object]]:
 
 def _format_claude_stream(input_stream, output_stream) -> int:
     tool_names: dict[str, str] = {}
+    pending_tool_errors: dict[str, list[str]] = {}
+
+    def flush_tool_errors(tool_name: str | None = None) -> None:
+        names = [tool_name] if tool_name else list(pending_tool_errors)
+        for name in names:
+            if not name:
+                continue
+            errors = pending_tool_errors.pop(name, [])
+            for error in errors:
+                print(error, file=output_stream, flush=True)
 
     for raw_line in input_stream:
         line = raw_line.strip()
@@ -352,6 +362,7 @@ def _format_claude_stream(input_stream, output_stream) -> int:
             for item in _message_content_items(event):
                 content_type = item.get("type")
                 if content_type == "text":
+                    flush_tool_errors()
                     text = item.get("text")
                     if isinstance(text, str) and text.strip():
                         print(text.strip(), file=output_stream, flush=True)
@@ -371,17 +382,26 @@ def _format_claude_stream(input_stream, output_stream) -> int:
                 tool_id = item.get("tool_use_id")
                 tool_name = tool_names.get(tool_id) if isinstance(tool_id, str) else None
                 if item.get("is_error"):
-                    print(f"Tool error from {_debugger_tool_name(tool_name or 'unknown')}", file=output_stream, flush=True)
+                    error_lines = [f"Tool error from {_debugger_tool_name(tool_name or 'unknown')}"]
+                    for formatted in _format_debugger_result(item.get("content"), tool_name):
+                        error_lines.append(formatted)
+                    pending_tool_errors.setdefault(tool_name or "unknown", []).extend(error_lines)
+                    continue
                 content = item.get("content")
                 if isinstance(content, list):
+                    flush_tool_errors(tool_name)
                     if tool_name == "ToolSearch":
                         print("Debugger tools loaded", file=output_stream, flush=True)
                     continue
-                for formatted in _format_debugger_result(content, tool_name):
+                formatted_lines = _format_debugger_result(content, tool_name)
+                if formatted_lines:
+                    pending_tool_errors.pop(tool_name or "unknown", None)
+                for formatted in formatted_lines:
                     print(formatted, file=output_stream, flush=True)
             continue
 
         if event_type == "result":
+            flush_tool_errors()
             subtype = event.get("subtype")
             duration_ms = event.get("duration_ms")
             turns = event.get("num_turns")
@@ -392,6 +412,7 @@ def _format_claude_stream(input_stream, output_stream) -> int:
                 summary.append(f"{duration_ms / 1000:.1f}s")
             print(" | ".join(summary), file=output_stream, flush=True)
 
+    flush_tool_errors()
     return 0
 
 

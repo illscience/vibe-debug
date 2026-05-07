@@ -259,6 +259,10 @@ class DebugSession:
         args: dict[str, Any] = {"expression": expression, "context": context}
         if frame_id is not None:
             args["frameId"] = int(frame_id)
+        elif self.state == "stopped":
+            stack = self.stack(levels=1)
+            if stack["frames"]:
+                args["frameId"] = int(stack["frames"][0]["id"])
         body = self.client.request("evaluate", args)
         return {
             "sessionId": self.session_id,
