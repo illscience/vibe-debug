@@ -19,3 +19,7 @@ jobs:
       - run: python -m pip install -e .
       - run: python -m unittest discover -s tests -v
       - run: python tools/runtime_proof.py
+      - run: npm pack --dry-run
+        if: matrix.python-version == '3.12'
+      - run: node bin/mcp-debugger.js --version
+        if: matrix.python-version == '3.12'

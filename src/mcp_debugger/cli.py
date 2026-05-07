@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -9,6 +10,9 @@ from pathlib import Path
 
 from . import __version__
 from .agent_guidance import AGENT_USAGE_GUIDANCE, guidance_for_target
+
+
+NPX_PACKAGE_SPEC = "github:illscience/mcp-debugger"
 
 
 DEMO_BUG = """def lookup_discount_rate(customer_tier):
@@ -39,15 +43,25 @@ if __name__ == "__main__":
 """
 
 
-def _mcp_command() -> str:
+def _mcp_command() -> list[str]:
+    command_json = os.environ.get("MCP_DEBUGGER_SERVER_COMMAND_JSON")
+    if command_json:
+        try:
+            command = json.loads(command_json)
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"Invalid MCP_DEBUGGER_SERVER_COMMAND_JSON: {exc}") from exc
+        if not isinstance(command, list) or not all(isinstance(item, str) for item in command):
+            raise SystemExit("MCP_DEBUGGER_SERVER_COMMAND_JSON must be a JSON array of strings.")
+        return command
+
     command = shutil.which("mcp-debugger-server")
     if command:
-        return command
+        return [command]
     for directory in (Path(sys.prefix) / "bin", Path(sys.executable).parent):
         sibling = directory / "mcp-debugger-server"
         if sibling.exists():
-            return str(sibling)
-    return "mcp-debugger-server"
+            return [str(sibling)]
+    return ["mcp-debugger-server"]
 
 
 def _doctor() -> int:
@@ -63,9 +77,7 @@ def _doctor() -> int:
     command = _mcp_command()
     try:
         process = subprocess.run(
-            [
-                command,
-            ],
+            command,
             input='\n'.join(
                 [
                     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}',
@@ -103,19 +115,18 @@ def _doctor() -> int:
 
 
 def _print_install(target: str) -> int:
-    command = _mcp_command()
     if target == "codex":
-        print(f"codex mcp add mcp_debugger -- {command}")
+        print(f"codex mcp add mcp_debugger -- npx -y {NPX_PACKAGE_SPEC}")
     elif target == "claude":
-        print(f"claude mcp add -s user mcp-debugger -- {command}")
+        print(f"claude mcp add -s user mcp-debugger -- npx -y {NPX_PACKAGE_SPEC}")
     else:
         print(
             json.dumps(
                 {
                     "mcpServers": {
                         "mcp-debugger": {
-                            "command": command,
-                            "args": [],
+                            "command": "npx",
+                            "args": ["-y", NPX_PACKAGE_SPEC],
                             "env": {},
                         }
                     }

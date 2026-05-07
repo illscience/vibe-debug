@@ -1,6 +1,6 @@
 # MCP Debugger
 
-An MCP debugger server that lets coding agents inspect live Python runtime state instead of guessing from source code.
+A debugger MCP server for coding agents.
 
 `mcp-debugger` gives Codex, Claude Code, Cursor-style agents, and other MCP clients real debugger tools: launch, attach, set breakpoints, continue, step into/out/over, inspect stack frames, read locals, expand variables, evaluate expressions, and stop sessions.
 
@@ -11,103 +11,47 @@ coding agent
   -> MCP tool call
   -> mcp-debugger
   -> Debug Adapter Protocol
-  -> debugpy
-  -> your Python program
+  -> language debugger backend
+  -> your app
 ```
 
-## Status
+## Install In Claude Code
 
-This is an alpha release focused on Python via [`debugpy`](https://github.com/microsoft/debugpy). It is already usable as a local MCP server and includes a runtime proof that drives a real debugger session end to end.
-
-## Quick Start
-
-### Fastest Trial With `uvx`
-
-If you have [`uv`](https://docs.astral.sh/uv/) installed, you can run the debugger without first putting `mcp-debugger` on your shell `PATH`:
+Add the MCP server at user scope so it is available from any project:
 
 ```bash
-uvx --from git+https://github.com/illscience/mcp-debugger.git mcp-debugger doctor
+claude mcp add -s user mcp-debugger -- npx -y github:illscience/mcp-debugger
+claude mcp get mcp-debugger
 ```
 
-You can also register the MCP server this way:
+Expected:
+
+```text
+Status: ✓ Connected
+Type: stdio
+Command: npx
+```
+
+If you tried an older install and Claude shows a broken local server such as `Command: mcp-debugger-server`, remove the local entry and add it again:
 
 ```bash
-claude mcp add -s user mcp-debugger -- uvx --from git+https://github.com/illscience/mcp-debugger.git mcp-debugger-server
+claude mcp remove mcp-debugger -s local 2>/dev/null || true
+claude mcp remove mcp-debugger -s user 2>/dev/null || true
+claude mcp add -s user mcp-debugger -- npx -y github:illscience/mcp-debugger
 ```
 
-### Persistent Install With `pipx`
+Claude Code loads project instructions from `./CLAUDE.md` ([Anthropic docs](https://docs.anthropic.com/en/docs/claude-code/memory)). `mcp-debugger` can create that file for you in a test project; see the clean-room test below.
 
-Install from GitHub:
+## Install In Codex
 
 ```bash
-pipx install git+https://github.com/illscience/mcp-debugger.git
-pipx ensurepath
-```
-
-Open a new terminal, or reload your shell, then verify both console scripts are available:
-
-```bash
-command -v mcp-debugger
-command -v mcp-debugger-server
-```
-
-Or install locally from a checkout:
-
-```bash
-git clone https://github.com/illscience/mcp-debugger.git
-cd mcp-debugger
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .
-```
-
-Verify the install:
-
-```bash
-mcp-debugger doctor
-```
-
-Expected result:
-
-```json
-{
-  "name": "mcp-debugger",
-  "checks": [
-    { "name": "debugpy import", "ok": true },
-    { "name": "MCP initialize", "ok": true }
-  ],
-  "ok": true
-}
-```
-
-## Add It To Codex
-
-If installed with `pipx`:
-
-```bash
-codex mcp add mcp_debugger -- mcp-debugger-server
-```
-
-If running from a local checkout:
-
-```bash
-codex mcp add mcp_debugger -- /absolute/path/to/mcp-debugger/.venv/bin/mcp-debugger-server
-```
-
-Codex's MCP config table names are safest with underscores, so the Codex config entry is `mcp_debugger` even though the project, package, and MCP server identify as `mcp-debugger`.
-
-You can print the exact command for your environment:
-
-```bash
-mcp-debugger install-snippet codex
-```
-
-Confirm Codex sees it:
-
-```bash
+codex mcp add mcp_debugger -- npx -y github:illscience/mcp-debugger
 codex mcp list
 ```
 
-Then start a fresh Codex session and ask it to debug a Python repro:
+Codex's MCP config table names are safest with underscores, so the Codex config entry is `mcp_debugger` even though the project and MCP server identify as `mcp-debugger`.
+
+Then start a fresh Codex session and ask it to debug a reproducible bug:
 
 ```text
 There is a bug in examples/buggy_discount.py. Figure out what is wrong and propose the fix.
@@ -119,45 +63,14 @@ For a direct smoke test:
 Use the mcp-debugger MCP tools to debug examples/buggy_discount.py. Start with debug_python_repro, set a breakpoint at the BREAK_MAIN_CALL line, inspect runtime locals, and explain the bug.
 ```
 
-## Add It To Claude Code
+## Status
 
-For the quickest trial, register the server through `uvx`. This does not require `mcp-debugger` or `mcp-debugger-server` to be on your shell `PATH`:
+This is an alpha release. The first debugger backend is Python via [`debugpy`](https://github.com/microsoft/debugpy); the MCP server is designed to grow to TypeScript/Node and other language runtimes.
 
-```bash
-claude mcp add -s user mcp-debugger -- uvx --from git+https://github.com/illscience/mcp-debugger.git mcp-debugger-server
-```
-
-If installed with `pipx`, either use:
+The npm package name in this repository is `@illscience/mcp-debugger`. Until it is published to npm, the install commands use `npx -y github:illscience/mcp-debugger`. After publishing, that can become:
 
 ```bash
-claude mcp add -s user mcp-debugger -- mcp-debugger-server
-```
-
-or print an install command that uses the resolved absolute path for your current environment:
-
-```bash
-mcp-debugger install-snippet claude
-```
-
-Confirm Claude Code can connect:
-
-```bash
-claude mcp get mcp-debugger
-```
-
-Expected:
-
-```text
-Status: ✓ Connected
-Type: stdio
-```
-
-The `-s user` scope is intentional: it makes the MCP server available from fresh project directories. If you omit it, Claude Code defaults to local scope and the server is only available from the directory where you added it.
-
-Claude Code loads project instructions from `./CLAUDE.md` ([Anthropic docs](https://docs.anthropic.com/en/docs/claude-code/memory)). `mcp-debugger` can create that file for you in a test project:
-
-```bash
-mcp-debugger init-agent-files --target claude
+npx -y @illscience/mcp-debugger
 ```
 
 ## Generic MCP Config
@@ -166,18 +79,12 @@ mcp-debugger init-agent-files --target claude
 {
   "mcpServers": {
     "mcp-debugger": {
-      "command": "mcp-debugger-server",
-      "args": [],
+      "command": "npx",
+      "args": ["-y", "github:illscience/mcp-debugger"],
       "env": {}
     }
   }
 }
-```
-
-Print an environment-specific JSON snippet:
-
-```bash
-mcp-debugger install-snippet json
 ```
 
 ## Clean-Room Prompt Test
@@ -187,7 +94,6 @@ This is the fastest way to prove the MCP works the way people will actually use 
 First make sure Claude Code has the MCP server registered at user scope:
 
 ```bash
-claude mcp add -s user mcp-debugger -- uvx --from git+https://github.com/illscience/mcp-debugger.git mcp-debugger-server
 claude mcp get mcp-debugger
 ```
 
@@ -196,7 +102,7 @@ Start in a fresh directory and create the demo files before asking Claude to deb
 ```bash
 mkdir /tmp/mcp-debugger-cleanroom
 cd /tmp/mcp-debugger-cleanroom
-uvx --from git+https://github.com/illscience/mcp-debugger.git mcp-debugger demo-project --target claude .
+npx -y github:illscience/mcp-debugger demo-project --target claude .
 ls
 ```
 
@@ -204,12 +110,6 @@ That creates:
 
 - `buggy_invoice.py`: a tiny Python program with a real arithmetic bug.
 - `CLAUDE.md`: Claude Code project memory that says to use live runtime debugging when a Python bug is reproducible.
-
-If you prefer a persistent install and `mcp-debugger` is on your `PATH`, this equivalent command also works:
-
-```bash
-mcp-debugger demo-project --target claude .
-```
 
 Run a natural prompt:
 
@@ -240,7 +140,7 @@ You can run the same clean-room prompt test with Codex:
 ```bash
 mkdir /tmp/mcp-debugger-codex
 cd /tmp/mcp-debugger-codex
-mcp-debugger demo-project --target codex .
+npx -y github:illscience/mcp-debugger demo-project --target codex .
 codex exec "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files."
 ```
 
@@ -351,16 +251,16 @@ For Codex, use `AGENTS.md`.
 Create the right file in a target project:
 
 ```bash
-mcp-debugger init-agent-files --target claude
-mcp-debugger init-agent-files --target codex
-mcp-debugger init-agent-files --target both
+npx -y github:illscience/mcp-debugger init-agent-files --target claude
+npx -y github:illscience/mcp-debugger init-agent-files --target codex
+npx -y github:illscience/mcp-debugger init-agent-files --target both
 ```
 
 Or print the guidance:
 
 ```bash
-mcp-debugger agent-instructions --target claude
-mcp-debugger agent-instructions --target codex
+npx -y github:illscience/mcp-debugger agent-instructions --target claude
+npx -y github:illscience/mcp-debugger agent-instructions --target codex
 ```
 
 The key instruction:

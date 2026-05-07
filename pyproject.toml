@@ -1,16 +1,15 @@
 [project]
 name = "mcp-debugger"
 version = "0.1.0"
-description = "An MCP debugger server that lets coding agents inspect live Python runtime state."
+description = "A debugger MCP server that lets coding agents inspect live runtime state."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
 keywords = ["mcp", "debugger", "debugpy", "dap", "coding-agent", "codex", "claude-code"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Topic :: Software Development :: Debuggers",

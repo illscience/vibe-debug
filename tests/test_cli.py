@@ -48,6 +48,14 @@ class CLITests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("claude mcp add -s user mcp-debugger", output)
+        self.assertIn("npx -y github:illscience/mcp-debugger", output)
+
+    def test_codex_install_snippet_uses_npx(self) -> None:
+        code, output = call_cli(["install-snippet", "codex"])
+
+        self.assertEqual(code, 0)
+        self.assertIn("codex mcp add mcp_debugger", output)
+        self.assertIn("npx -y github:illscience/mcp-debugger", output)
 
 
 if __name__ == "__main__":

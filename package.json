@@ -1,0 +1,32 @@
+{
+  "name": "@illscience/mcp-debugger",
+  "version": "0.1.0",
+  "description": "Debugger MCP server for coding agents.",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "mcp-debugger": "bin/mcp-debugger.js"
+  },
+  "files": [
+    "bin/mcp-debugger.js",
+    "src/mcp_debugger/*.py",
+    "pyproject.toml",
+    "README.md",
+    "LICENSE",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "examples",
+    "tools"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/illscience/mcp-debugger.git"
+  },
+  "bugs": {
+    "url": "https://github.com/illscience/mcp-debugger/issues"
+  },
+  "homepage": "https://github.com/illscience/mcp-debugger#readme"
+}
