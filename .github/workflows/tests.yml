@@ -21,13 +21,13 @@ jobs:
       - run: python tools/runtime_proof.py
       - run: npm pack --dry-run
         if: matrix.python-version == '3.12'
-      - run: node bin/mcp-debugger.js --version
+      - run: node bin/vibe-debug.js --version
         if: matrix.python-version == '3.12'
       - run: |
           printf '%s\n' \
-            '{"type":"system","subtype":"init","cwd":"/tmp/demo","mcp_servers":[{"name":"mcp-debugger","status":"connected"}]}' \
-            '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"mcp__mcp-debugger__debug_python_repro","input":{"program":"/tmp/demo/buggy_invoice.py"}}]}}' \
+            '{"type":"system","subtype":"init","cwd":"/tmp/demo","mcp_servers":[{"name":"vibe-debug","status":"connected"}]}' \
+            '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"mcp__vibe-debug__debug_python_repro","input":{"program":"/tmp/demo/buggy_invoice.py"}}]}}' \
             '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"{\"stopped\":{\"location\":{\"name\":\"invoice_total\",\"line\":13,\"source\":{\"path\":\"/tmp/demo/buggy_invoice.py\"}}},\"snapshot\":{\"locals\":[{\"name\":\"subtotal\",\"value\":\"120.0\"},{\"name\":\"rate\",\"value\":\"0.15\"},{\"name\":\"total\",\"value\":\"119.85\"}]}}"}]}}' \
-            | node bin/mcp-debugger.js claude-progress \
+            | node bin/vibe-debug.js claude-progress \
             | grep 'Locals: subtotal=120.0 rate=0.15 total=119.85'
         if: matrix.python-version == '3.12'

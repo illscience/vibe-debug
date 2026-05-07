@@ -1,15 +1,15 @@
-# MCP Debugger
+# Vibe Debug
 
-A debugger MCP server for coding agents.
+A debugger CLI and MCP server for coding agents.
 
-`mcp-debugger` gives Codex, Claude Code, Cursor-style agents, and other MCP clients real debugger tools: launch, attach, set breakpoints, continue, step into/out/over, inspect stack frames, read locals, expand variables, evaluate expressions, and stop sessions.
+`vibe-debug` gives Codex, Claude Code, Cursor-style agents, and other MCP clients real debugger tools: launch, attach, set breakpoints, continue, step into/out/over, inspect stack frames, read locals, expand variables, evaluate expressions, and stop sessions.
 
 The goal is simple: when an agent is fixing a bug, it should be able to use a debugger the same way a human engineer would.
 
 ```text
 coding agent
-  -> MCP tool call
-  -> mcp-debugger
+  -> CLI command or MCP tool call
+  -> vibe-debug
   -> Debug Adapter Protocol
   -> language debugger backend
   -> your app
@@ -20,16 +20,16 @@ coding agent
 ### Claude Code
 
 ```bash
-claude mcp add -s user mcp-debugger -- npx -y github:illscience/mcp-debugger
+claude mcp add -s user vibe-debug -- npx -y github:illscience/vibe-debug
 ```
 
 ### Codex
 
 ```bash
-codex mcp add mcp_debugger -- npx -y github:illscience/mcp-debugger
+codex mcp add vibe_debug -- npx -y github:illscience/vibe-debug
 ```
 
-Codex's MCP config table names are safest with underscores, so the Codex config entry is `mcp_debugger` even though the project and MCP server identify as `mcp-debugger`.
+Codex's MCP config table names are safest with underscores, so the Codex config entry is `vibe_debug` even though the project and MCP server identify as `vibe-debug`.
 
 ### Other MCP Clients
 
@@ -38,9 +38,9 @@ Use this stdio server config:
 ```json
 {
   "mcpServers": {
-    "mcp-debugger": {
+    "vibe-debug": {
       "command": "npx",
-      "args": ["-y", "github:illscience/mcp-debugger"],
+      "args": ["-y", "github:illscience/vibe-debug"],
       "env": {}
     }
   }
@@ -52,26 +52,28 @@ Use this stdio server config:
 The MCP server uses a small Python/debugpy cache behind the `npx` wrapper. Warm and verify it with:
 
 ```bash
-npx -y github:illscience/mcp-debugger doctor
+npx -y github:illscience/vibe-debug doctor
 ```
 
 Expected output:
 
 ```text
-mcp-debugger 0.1.3
+vibe-debug 0.2.0
 Python: ...
 debugpy import: ok
 MCP initialize: ok
 ```
 
-For the full machine-readable report, run `npx -y github:illscience/mcp-debugger doctor --json`.
+For the full machine-readable report, run `npx -y github:illscience/vibe-debug doctor --json`.
 
 ### Disable
 
 MCP tools are visible to the agent while the server is enabled. If you only want debugger tools for a specific project or debugging session, remove the MCP entry when you are done:
 
 ```bash
+claude mcp remove vibe-debug -s user
 claude mcp remove mcp-debugger -s user
+codex mcp remove vibe_debug
 codex mcp remove mcp_debugger
 ```
 
@@ -80,7 +82,7 @@ codex mcp remove mcp_debugger
 You can also run the debugger as a normal CLI from any coding agent shell. This avoids adding persistent MCP tools when you only need debugger state for a single bug:
 
 ```bash
-npx -y github:illscience/mcp-debugger debug-python ./buggy_invoice.py --break ./buggy_invoice.py:13 --eval "subtotal * (1 - rate)"
+npx -y github:illscience/vibe-debug debug-python ./buggy_invoice.py --break ./buggy_invoice.py:13 --eval "subtotal * (1 - rate)"
 ```
 
 Human output is concise:
@@ -100,25 +102,25 @@ Evaluations:
 Use `--json` when you want machine-readable output for an agent or script:
 
 ```bash
-npx -y github:illscience/mcp-debugger debug-python ./buggy_invoice.py --break ./buggy_invoice.py:13 --eval "subtotal * (1 - rate)" --json
+npx -y github:illscience/vibe-debug debug-python ./buggy_invoice.py --break ./buggy_invoice.py:13 --eval "subtotal * (1 - rate)" --json
 ```
 
 To help agents discover the CLI without keeping MCP tools enabled, add a lightweight project skill:
 
 ```bash
-npx -y github:illscience/mcp-debugger init-cli-skill --target claude
+npx -y github:illscience/vibe-debug init-cli-skill --target claude
 ```
 
-That writes `.claude/skills/mcp-debugger/SKILL.md`: a short skill whose frontmatter explicitly triggers on reproducible Python bugs, failing Python tests/scripts, wrong output, exceptions, and logic errors where live runtime state would help. The skill body is CLI documentation for `debug-python`.
+That writes `.claude/skills/vibe-debug/SKILL.md`: a short skill whose frontmatter explicitly triggers on reproducible Python bugs, failing Python tests/scripts, wrong output, exceptions, and logic errors where live runtime state would help. The skill body is CLI documentation for `debug-python`.
 
 ## Status
 
 This is an alpha release. The first debugger backend is Python via [`debugpy`](https://github.com/microsoft/debugpy); the MCP server is designed to grow to TypeScript/Node and other language runtimes.
 
-The npm package name in this repository is `@illscience/mcp-debugger`. Until it is published to npm, the install commands use `npx -y github:illscience/mcp-debugger`. After publishing, that can become:
+The npm package name in this repository is `@illscience/vibe-debug`. Until it is published to npm, the install commands use `npx -y github:illscience/vibe-debug`. After publishing, that can become:
 
 ```bash
-npx -y @illscience/mcp-debugger
+npx -y @illscience/vibe-debug
 ```
 
 ## Optional Clean-Room Test
@@ -130,22 +132,24 @@ This proves the MCP works the way people actually use it: from a normal bug-fixi
 Paste this block:
 
 ```bash
-npx -y github:illscience/mcp-debugger doctor
+npx -y github:illscience/vibe-debug doctor
 
-claude mcp add -s user mcp-debugger -- npx -y github:illscience/mcp-debugger
-claude mcp get mcp-debugger
+claude mcp add -s user vibe-debug -- npx -y github:illscience/vibe-debug
+claude mcp get vibe-debug
 
-rm -rf /tmp/mcp-debugger-claude-verify
-mkdir /tmp/mcp-debugger-claude-verify
-cd /tmp/mcp-debugger-claude-verify
-npx -y github:illscience/mcp-debugger demo-project --target claude .
+rm -rf /tmp/vibe-debug-claude-verify
+mkdir /tmp/vibe-debug-claude-verify
+cd /tmp/vibe-debug-claude-verify
+npx -y github:illscience/vibe-debug demo-project --target claude .
 
-claude -p --output-format stream-json --verbose "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files." | npx -y github:illscience/mcp-debugger claude-progress
+claude -p --output-format stream-json --verbose "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files." | npx -y github:illscience/vibe-debug claude-progress
 ```
 
 If you previously installed an old version, reset first:
 
 ```bash
+claude mcp remove vibe-debug -s local 2>/dev/null || true
+claude mcp remove vibe-debug -s user 2>/dev/null || true
 claude mcp remove mcp-debugger -s local 2>/dev/null || true
 claude mcp remove mcp-debugger -s user 2>/dev/null || true
 ```
@@ -155,13 +159,13 @@ The `demo-project` command creates:
 - `buggy_invoice.py`: a tiny Python program with a real arithmetic bug.
 - `CLAUDE.md`: Claude Code project memory that says to use live runtime debugging when a reproducible bug has observable runtime state.
 
-Claude Code loads project instructions from `./CLAUDE.md` ([Anthropic docs](https://docs.anthropic.com/en/docs/claude-code/memory)). `mcp-debugger` can create that file for you in a test project, as shown above.
+Claude Code loads project instructions from `./CLAUDE.md` ([Anthropic docs](https://docs.anthropic.com/en/docs/claude-code/memory)). `vibe-debug` can create that file for you in a test project, as shown above.
 
-You should see `mcp-debugger` listed as connected, starting, or active and, on a successful debugger-assisted run, a tool call such as `mcp__mcp-debugger__debug_python_repro`.
+You should see `vibe-debug` listed as connected, starting, or active and, on a successful debugger-assisted run, a tool call such as `mcp__vibe-debug__debug_python_repro`.
 
 What you want to see:
 
-- Claude calls the `mcp-debugger` MCP server, usually starting with `debug_python_repro`.
+- Claude calls the `vibe-debug` MCP server, usually starting with `debug_python_repro`.
 - Claude reports runtime values such as `subtotal = 120.0`, `customer_tier = 'gold'`, and `rate = 0.15`.
 - Claude explains that the program subtracts `0.15` directly instead of subtracting `120.0 * 0.15`.
 - Claude proposes `total = subtotal * (1 - rate)` or `total = subtotal - (subtotal * rate)`.
@@ -169,21 +173,22 @@ What you want to see:
 ### Codex
 
 ```bash
-npx -y github:illscience/mcp-debugger doctor
+npx -y github:illscience/vibe-debug doctor
 
-codex mcp add mcp_debugger -- npx -y github:illscience/mcp-debugger
-codex mcp get mcp_debugger
+codex mcp add vibe_debug -- npx -y github:illscience/vibe-debug
+codex mcp get vibe_debug
 
-rm -rf /tmp/mcp-debugger-codex
-mkdir /tmp/mcp-debugger-codex
-cd /tmp/mcp-debugger-codex
-npx -y github:illscience/mcp-debugger demo-project --target codex .
+rm -rf /tmp/vibe-debug-codex
+mkdir /tmp/vibe-debug-codex
+cd /tmp/vibe-debug-codex
+npx -y github:illscience/vibe-debug demo-project --target codex .
 codex exec "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files."
 ```
 
 If you previously tried an old version, reset first:
 
 ```bash
+codex mcp remove vibe_debug 2>/dev/null || true
 codex mcp remove mcp_debugger 2>/dev/null || true
 codex mcp remove codex-debugger 2>/dev/null || true
 ```
@@ -296,16 +301,16 @@ For Codex, use `AGENTS.md`.
 Create the right file in a target project:
 
 ```bash
-npx -y github:illscience/mcp-debugger init-agent-files --target claude
-npx -y github:illscience/mcp-debugger init-agent-files --target codex
-npx -y github:illscience/mcp-debugger init-agent-files --target both
+npx -y github:illscience/vibe-debug init-agent-files --target claude
+npx -y github:illscience/vibe-debug init-agent-files --target codex
+npx -y github:illscience/vibe-debug init-agent-files --target both
 ```
 
 Or print the guidance:
 
 ```bash
-npx -y github:illscience/mcp-debugger agent-instructions --target claude
-npx -y github:illscience/mcp-debugger agent-instructions --target codex
+npx -y github:illscience/vibe-debug agent-instructions --target claude
+npx -y github:illscience/vibe-debug agent-instructions --target codex
 ```
 
 The key instruction:
@@ -328,7 +333,7 @@ python3 -m venv .venv
 Build a wheel:
 
 ```bash
-.venv/bin/python -m pip wheel . -w /tmp/mcp-debugger-wheel
+.venv/bin/python -m pip wheel . -w /tmp/vibe-debug-wheel
 ```
 
 ## Safety

@@ -11,13 +11,16 @@ const packageRoot = path.resolve(__dirname, "..");
 const packageJson = require(path.join(packageRoot, "package.json"));
 
 function cacheRoot() {
+  if (process.env.VIBE_DEBUG_CACHE) {
+    return process.env.VIBE_DEBUG_CACHE;
+  }
   if (process.env.MCP_DEBUGGER_CACHE) {
     return process.env.MCP_DEBUGGER_CACHE;
   }
   if (process.env.XDG_CACHE_HOME) {
-    return path.join(process.env.XDG_CACHE_HOME, "mcp-debugger");
+    return path.join(process.env.XDG_CACHE_HOME, "vibe-debug");
   }
-  return path.join(os.homedir(), ".cache", "mcp-debugger");
+  return path.join(os.homedir(), ".cache", "vibe-debug");
 }
 
 function run(command, args, options = {}) {
@@ -35,7 +38,7 @@ function runSetup(command, args, failureMessage) {
     encoding: "utf8",
   });
 
-  if (process.env.MCP_DEBUGGER_VERBOSE_INSTALL) {
+  if (process.env.VIBE_DEBUG_VERBOSE_INSTALL || process.env.MCP_DEBUGGER_VERBOSE_INSTALL) {
     if (result.stdout) {
       process.stderr.write(result.stdout);
     }
@@ -57,8 +60,9 @@ function runSetup(command, args, failureMessage) {
 }
 
 function pythonCandidates() {
-  if (process.env.MCP_DEBUGGER_PYTHON) {
-    return [{ command: process.env.MCP_DEBUGGER_PYTHON, args: [] }];
+  const configuredPython = process.env.VIBE_DEBUG_PYTHON || process.env.MCP_DEBUGGER_PYTHON;
+  if (configuredPython) {
+    return [{ command: configuredPython, args: [] }];
   }
   if (process.platform === "win32") {
     return [
@@ -86,8 +90,8 @@ function findPython() {
     }
   }
 
-  console.error("mcp-debugger requires Python 3.10 or newer.");
-  console.error("Install Python, or set MCP_DEBUGGER_PYTHON to a Python executable.");
+  console.error("vibe-debug requires Python 3.10 or newer.");
+  console.error("Install Python, or set VIBE_DEBUG_PYTHON to a Python executable.");
   process.exit(1);
 }
 
@@ -133,7 +137,7 @@ function acquireInstallLock(lockDir) {
       }
 
       if (Date.now() - startedAt > timeoutMs) {
-        console.error(`Timed out waiting for the mcp-debugger install lock: ${lockDir}`);
+        console.error(`Timed out waiting for the vibe-debug install lock: ${lockDir}`);
         process.exit(1);
       }
       sleep(100);
@@ -259,7 +263,7 @@ function ensureVenv() {
     runSetup(
       python.command,
       [...python.args, "-m", "venv", venvDir],
-      "Failed to create the mcp-debugger Python environment.",
+      "Failed to create the vibe-debug Python environment.",
     );
 
     prepareInstallSource(sourceDir);
@@ -295,6 +299,7 @@ function main() {
   const env = {
     ...process.env,
     PYTHONPATH: [pythonModulePath, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
+    VIBE_DEBUG_SERVER_COMMAND_JSON: JSON.stringify([pythonPath, "-m", "mcp_debugger.mcp_server"]),
     MCP_DEBUGGER_SERVER_COMMAND_JSON: JSON.stringify([pythonPath, "-m", "mcp_debugger.mcp_server"]),
   };
 

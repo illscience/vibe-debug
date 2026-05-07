@@ -128,7 +128,7 @@ def main() -> int:
     session_id: str | None = None
     try:
         init = client.request("initialize", {"protocolVersion": "2025-06-18"})
-        assert init["serverInfo"]["name"] == "mcp-debugger"
+        assert init["serverInfo"]["name"] == "vibe-debug"
         client.notify("notifications/initialized")
 
         tools = client.request("tools/list")

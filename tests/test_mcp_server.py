@@ -17,7 +17,7 @@ class MCPServerTests(unittest.TestCase):
                 "params": {"protocolVersion": "2025-06-18"},
             }
         )
-        self.assertEqual(initialize["result"]["serverInfo"]["name"], "mcp-debugger")
+        self.assertEqual(initialize["result"]["serverInfo"]["name"], "vibe-debug")
 
         listed = server.handle_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         tools = {tool["name"] for tool in listed["result"]["tools"]}

@@ -13,7 +13,10 @@ from .agent_guidance import AGENT_USAGE_GUIDANCE, guidance_for_target
 from .session import DebugSession
 
 
-NPX_PACKAGE_SPEC = "github:illscience/mcp-debugger"
+NPX_PACKAGE_SPEC = "github:illscience/vibe-debug"
+PRIMARY_MCP_SERVER_NAME = "vibe-debug"
+LEGACY_MCP_SERVER_NAME = "mcp-debugger"
+MCP_SERVER_NAMES = {PRIMARY_MCP_SERVER_NAME, LEGACY_MCP_SERVER_NAME}
 
 
 DEMO_BUG = """def lookup_discount_rate(customer_tier):
@@ -45,18 +48,18 @@ if __name__ == "__main__":
 
 
 CLI_DISCOVERY_SKILL = """---
-name: mcp-debugger
+name: vibe-debug
 description: "Use when the user asks to debug, fix, explain, or diagnose a reproducible Python bug, failing Python script, failing Python test, wrong output, unexpected exception, or logic error where live runtime state could help. Trigger when a runnable Python repro exists or can be created and breakpoint locals, stack location, or expression evaluation would provide evidence. Do not use for non-Python bugs, pure style refactors, documentation-only tasks, or cases with no executable repro."
 ---
 
-# MCP Debugger CLI
+# Vibe Debug CLI
 
-Use the `mcp-debugger` CLI to observe live Python runtime state before proposing a fix.
+Use the `vibe-debug` CLI to observe live Python runtime state before proposing a fix.
 
 ## Primary Command
 
 ```bash
-npx -y github:illscience/mcp-debugger debug-python <script.py> --break <file.py>:<line> --json
+npx -y github:illscience/vibe-debug debug-python <script.py> --break <file.py>:<line> --json
 ```
 
 Pick a breakpoint at the suspicious calculation, branch, return, assertion, or exception site. If no breakpoint is known yet, run with `--stop-on-entry --json`, inspect the code, then run again with a more useful breakpoint.
@@ -81,7 +84,7 @@ Pick a breakpoint at the suspicious calculation, branch, return, assertion, or e
 ## Example
 
 ```bash
-npx -y github:illscience/mcp-debugger debug-python buggy_invoice.py --break buggy_invoice.py:13 --eval "subtotal * (1 - rate)" --json
+npx -y github:illscience/vibe-debug debug-python buggy_invoice.py --break buggy_invoice.py:13 --eval "subtotal * (1 - rate)" --json
 ```
 
 Use the result to explain what the program actually did, not only what the source appears to say.
@@ -89,24 +92,26 @@ Use the result to explain what the program actually did, not only what the sourc
 
 
 def _mcp_command() -> list[str]:
-    command_json = os.environ.get("MCP_DEBUGGER_SERVER_COMMAND_JSON")
+    command_json = os.environ.get("VIBE_DEBUG_SERVER_COMMAND_JSON") or os.environ.get("MCP_DEBUGGER_SERVER_COMMAND_JSON")
     if command_json:
         try:
             command = json.loads(command_json)
         except json.JSONDecodeError as exc:
-            raise SystemExit(f"Invalid MCP_DEBUGGER_SERVER_COMMAND_JSON: {exc}") from exc
+            raise SystemExit(f"Invalid VIBE_DEBUG_SERVER_COMMAND_JSON: {exc}") from exc
         if not isinstance(command, list) or not all(isinstance(item, str) for item in command):
-            raise SystemExit("MCP_DEBUGGER_SERVER_COMMAND_JSON must be a JSON array of strings.")
+            raise SystemExit("VIBE_DEBUG_SERVER_COMMAND_JSON must be a JSON array of strings.")
         return command
 
-    command = shutil.which("mcp-debugger-server")
-    if command:
-        return [command]
+    for command_name in ("vibe-debug-server", "mcp-debugger-server"):
+        command = shutil.which(command_name)
+        if command:
+            return [command]
     for directory in (Path(sys.prefix) / "bin", Path(sys.executable).parent):
-        sibling = directory / "mcp-debugger-server"
-        if sibling.exists():
-            return [str(sibling)]
-    return ["mcp-debugger-server"]
+        for command_name in ("vibe-debug-server", "mcp-debugger-server"):
+            sibling = directory / command_name
+            if sibling.exists():
+                return [str(sibling)]
+    return ["vibe-debug-server"]
 
 
 def _doctor_report() -> dict[str, object]:
@@ -135,7 +140,7 @@ def _doctor_report() -> dict[str, object]:
             timeout=10,
             check=False,
         )
-        ok = process.returncode == 0 and '"name":"mcp-debugger"' in process.stdout
+        ok = process.returncode == 0 and '"name":"vibe-debug"' in process.stdout
         checks.append(
             {
                 "name": "MCP initialize",
@@ -149,7 +154,7 @@ def _doctor_report() -> dict[str, object]:
         checks.append({"name": "MCP initialize", "ok": False, "command": command, "error": str(exc)})
 
     report = {
-        "name": "mcp-debugger",
+        "name": "vibe-debug",
         "version": __version__,
         "python": sys.executable,
         "checks": checks,
@@ -164,10 +169,10 @@ def _print_doctor_human(report: dict[str, object], quiet: bool) -> None:
 
     if quiet:
         status = "ok" if ok else "failed"
-        print(f"{report.get('name', 'mcp-debugger')}: {status}")
+        print(f"{report.get('name', 'vibe-debug')}: {status}")
         return
 
-    print(f"{report.get('name', 'mcp-debugger')} {report.get('version', 'unknown')}")
+    print(f"{report.get('name', 'vibe-debug')} {report.get('version', 'unknown')}")
     print(f"Python: {report.get('python', 'unknown')}")
 
     if not isinstance(checks, list):
@@ -200,15 +205,15 @@ def _doctor(json_output: bool = False, quiet: bool = False) -> int:
 
 def _print_install(target: str) -> int:
     if target == "codex":
-        print(f"codex mcp add mcp_debugger -- npx -y {NPX_PACKAGE_SPEC}")
+        print(f"codex mcp add vibe_debug -- npx -y {NPX_PACKAGE_SPEC}")
     elif target == "claude":
-        print(f"claude mcp add -s user mcp-debugger -- npx -y {NPX_PACKAGE_SPEC}")
+        print(f"claude mcp add -s user vibe-debug -- npx -y {NPX_PACKAGE_SPEC}")
     else:
         print(
             json.dumps(
                 {
                     "mcpServers": {
-                        "mcp-debugger": {
+                        "vibe-debug": {
                             "command": "npx",
                             "args": ["-y", NPX_PACKAGE_SPEC],
                             "env": {},
@@ -258,9 +263,9 @@ def _init_agent_files(target: str, directory: str, force: bool) -> int:
 def _skill_path(target: str, directory: str) -> Path:
     root = Path(directory).resolve()
     if target == "claude":
-        return root / ".claude" / "skills" / "mcp-debugger" / "SKILL.md"
+        return root / ".claude" / "skills" / "vibe-debug" / "SKILL.md"
     if target == "codex":
-        return root / ".codex" / "skills" / "mcp-debugger" / "SKILL.md"
+        return root / ".codex" / "skills" / "vibe-debug" / "SKILL.md"
     raise ValueError(f"unknown target: {target}")
 
 
@@ -544,10 +549,15 @@ def _load_json_maybe(value: object) -> object | None:
 
 
 def _debugger_tool_name(name: str) -> str:
-    prefix = "mcp__mcp-debugger__"
-    if name.startswith(prefix):
-        return f"mcp-debugger.{name.removeprefix(prefix)}"
+    for server_name in MCP_SERVER_NAMES:
+        prefix = f"mcp__{server_name}__"
+        if name.startswith(prefix):
+            return f"{server_name}.{name.removeprefix(prefix)}"
     return name
+
+
+def _is_debugger_tool_name(name: str) -> bool:
+    return any(name.startswith(f"mcp__{server_name}__") for server_name in MCP_SERVER_NAMES)
 
 
 def _basename(path: object) -> str:
@@ -654,8 +664,8 @@ def _message_content_items(event: dict[str, object]) -> list[dict[str, object]]:
 def _format_claude_stream(input_stream, output_stream) -> int:
     tool_names: dict[str, str] = {}
     pending_tool_errors: dict[str, list[str]] = {}
-    mcp_debugger_status: str | None = None
-    mcp_debugger_active_printed = False
+    debugger_status: str | None = None
+    debugger_active_printed = False
 
     def flush_tool_errors(tool_name: str | None = None) -> None:
         names = [tool_name] if tool_name else list(pending_tool_errors)
@@ -686,15 +696,16 @@ def _format_claude_stream(input_stream, output_stream) -> int:
             mcp_servers = event.get("mcp_servers")
             if isinstance(mcp_servers, list):
                 for server in mcp_servers:
-                    if not isinstance(server, dict) or server.get("name") != "mcp-debugger":
+                    if not isinstance(server, dict) or server.get("name") not in MCP_SERVER_NAMES:
                         continue
+                    server_name = str(server.get("name"))
                     status = server.get("status")
                     if isinstance(status, str):
-                        mcp_debugger_status = status
+                        debugger_status = status
                         display_status = "starting" if status == "pending" else status
                     else:
                         display_status = "unknown"
-                    print(f"MCP: mcp-debugger {display_status}", file=output_stream, flush=True)
+                    print(f"MCP: {server_name} {display_status}", file=output_stream, flush=True)
             continue
 
         if event_type == "assistant":
@@ -712,12 +723,12 @@ def _format_claude_stream(input_stream, output_stream) -> int:
                         tool_names[tool_id] = name
                     if isinstance(name, str):
                         if (
-                            name.startswith("mcp__mcp-debugger__")
-                            and mcp_debugger_status != "connected"
-                            and not mcp_debugger_active_printed
+                            _is_debugger_tool_name(name)
+                            and debugger_status != "connected"
+                            and not debugger_active_printed
                         ):
-                            print("MCP: mcp-debugger active", file=output_stream, flush=True)
-                            mcp_debugger_active_printed = True
+                            print("MCP: vibe-debug active", file=output_stream, flush=True)
+                            debugger_active_printed = True
                         print(_format_tool_use(name, item.get("input")), file=output_stream, flush=True)
             continue
 
@@ -763,8 +774,8 @@ def _format_claude_stream(input_stream, output_stream) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Utilities for the mcp-debugger MCP server.")
-    parser.add_argument("--version", action="version", version=f"mcp-debugger {__version__}")
+    parser = argparse.ArgumentParser(description="Utilities for the vibe-debug MCP server.")
+    parser.add_argument("--version", action="version", version=f"vibe-debug {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     doctor = subparsers.add_parser("doctor", help="Verify debugpy and the MCP server entry point.")

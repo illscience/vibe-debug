@@ -22,7 +22,7 @@ class CLITests(unittest.TestCase):
         code, output = call_cli(["doctor"])
 
         self.assertEqual(code, 0)
-        self.assertIn("mcp-debugger", output)
+        self.assertIn("vibe-debug", output)
         self.assertIn("debugpy import: ok", output)
         self.assertIn("MCP initialize: ok", output)
         self.assertNotIn('"checks"', output)
@@ -32,7 +32,7 @@ class CLITests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         payload = json.loads(output)
-        self.assertEqual(payload["name"], "mcp-debugger")
+        self.assertEqual(payload["name"], "vibe-debug")
         self.assertTrue(payload["ok"])
         self.assertIsInstance(payload["checks"], list)
 
@@ -40,7 +40,7 @@ class CLITests(unittest.TestCase):
         code, output = call_cli(["doctor", "--quiet"])
 
         self.assertEqual(code, 0)
-        self.assertEqual(output, "mcp-debugger: ok\n")
+        self.assertEqual(output, "vibe-debug: ok\n")
 
     def test_demo_project_writes_claude_memory_and_bug(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -89,15 +89,15 @@ class CLITests(unittest.TestCase):
         code, output = call_cli(["install-snippet", "claude"])
 
         self.assertEqual(code, 0)
-        self.assertIn("claude mcp add -s user mcp-debugger", output)
-        self.assertIn("npx -y github:illscience/mcp-debugger", output)
+        self.assertIn("claude mcp add -s user vibe-debug", output)
+        self.assertIn("npx -y github:illscience/vibe-debug", output)
 
     def test_codex_install_snippet_uses_npx(self) -> None:
         code, output = call_cli(["install-snippet", "codex"])
 
         self.assertEqual(code, 0)
-        self.assertIn("codex mcp add mcp_debugger", output)
-        self.assertIn("npx -y github:illscience/mcp-debugger", output)
+        self.assertIn("codex mcp add vibe_debug", output)
+        self.assertIn("npx -y github:illscience/vibe-debug", output)
 
     def test_debug_python_stops_and_prints_locals(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -141,7 +141,7 @@ class CLITests(unittest.TestCase):
                 "type": "system",
                 "subtype": "init",
                 "cwd": "/tmp/demo",
-                "mcp_servers": [{"name": "mcp-debugger", "status": "connected"}],
+                "mcp_servers": [{"name": "vibe-debug", "status": "connected"}],
             },
             {
                 "type": "assistant",
@@ -150,7 +150,7 @@ class CLITests(unittest.TestCase):
                         {
                             "type": "tool_use",
                             "id": "tool-1",
-                            "name": "mcp__mcp-debugger__debug_python_repro",
+                            "name": "mcp__vibe-debug__debug_python_repro",
                             "input": {"program": "/tmp/demo/buggy_invoice.py"},
                         }
                     ]
@@ -192,7 +192,7 @@ class CLITests(unittest.TestCase):
                         {
                             "type": "tool_use",
                             "id": "tool-2",
-                            "name": "mcp__mcp-debugger__debug_evaluate",
+                            "name": "mcp__vibe-debug__debug_evaluate",
                             "input": {"expression": "subtotal * (1 - rate)"},
                         }
                     ]
@@ -221,19 +221,19 @@ class CLITests(unittest.TestCase):
 
         self.assertEqual(_format_claude_stream(input_stream, output_stream), 0)
         output = output_stream.getvalue()
-        self.assertIn("MCP: mcp-debugger connected", output)
-        self.assertIn("Tool: mcp-debugger.debug_python_repro (buggy_invoice.py)", output)
+        self.assertIn("MCP: vibe-debug connected", output)
+        self.assertIn("Tool: vibe-debug.debug_python_repro (buggy_invoice.py)", output)
         self.assertIn("Stopped: buggy_invoice.py:13 in invoice_total", output)
         self.assertIn("Locals: subtotal=120.0 rate=0.15 total=119.85", output)
         self.assertIn("Eval: subtotal * (1 - rate) -> 102.0", output)
 
-    def test_claude_progress_treats_pending_mcp_as_starting_until_tool_use(self) -> None:
+    def test_claude_progress_accepts_legacy_mcp_debugger_name(self) -> None:
         events = [
             {
                 "type": "system",
                 "subtype": "init",
                 "cwd": "/tmp/demo",
-                "mcp_servers": [{"name": "mcp-debugger", "status": "pending"}],
+                "mcp_servers": [{"name": "mcp-debugger", "status": "connected"}],
             },
             {
                 "type": "assistant",
@@ -254,9 +254,39 @@ class CLITests(unittest.TestCase):
 
         self.assertEqual(_format_claude_stream(input_stream, output_stream), 0)
         output = output_stream.getvalue()
-        self.assertIn("MCP: mcp-debugger starting", output)
-        self.assertIn("MCP: mcp-debugger active", output)
-        self.assertNotIn("MCP: mcp-debugger pending", output)
+        self.assertIn("MCP: mcp-debugger connected", output)
+        self.assertIn("Tool: mcp-debugger.debug_python_repro (buggy_invoice.py)", output)
+
+    def test_claude_progress_treats_pending_mcp_as_starting_until_tool_use(self) -> None:
+        events = [
+            {
+                "type": "system",
+                "subtype": "init",
+                "cwd": "/tmp/demo",
+                "mcp_servers": [{"name": "vibe-debug", "status": "pending"}],
+            },
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tool-1",
+                            "name": "mcp__vibe-debug__debug_python_repro",
+                            "input": {"program": "/tmp/demo/buggy_invoice.py"},
+                        }
+                    ]
+                },
+            },
+        ]
+        input_stream = StringIO("\n".join(json.dumps(event) for event in events))
+        output_stream = StringIO()
+
+        self.assertEqual(_format_claude_stream(input_stream, output_stream), 0)
+        output = output_stream.getvalue()
+        self.assertIn("MCP: vibe-debug starting", output)
+        self.assertIn("MCP: vibe-debug active", output)
+        self.assertNotIn("MCP: vibe-debug pending", output)
 
     def test_claude_progress_suppresses_transient_retried_tool_error(self) -> None:
         events = [
@@ -267,7 +297,7 @@ class CLITests(unittest.TestCase):
                         {
                             "type": "tool_use",
                             "id": "tool-1",
-                            "name": "mcp__mcp-debugger__debug_evaluate",
+                            "name": "mcp__vibe-debug__debug_evaluate",
                             "input": {"expression": "subtotal * (1 - rate)"},
                         }
                     ]
@@ -293,7 +323,7 @@ class CLITests(unittest.TestCase):
                         {
                             "type": "tool_use",
                             "id": "tool-2",
-                            "name": "mcp__mcp-debugger__debug_evaluate",
+                            "name": "mcp__vibe-debug__debug_evaluate",
                             "input": {"expression": "subtotal * (1 - rate)", "frameId": 2},
                         }
                     ]

@@ -103,7 +103,7 @@ class DebugSession:
         session._initialize()
 
         launch_args: dict[str, Any] = {
-            "name": "mcp-debugger",
+            "name": "vibe-debug",
             "type": "python",
             "request": "launch",
             "program": program_path,
@@ -138,7 +138,7 @@ class DebugSession:
         )
         session._initialize()
         attach_args: dict[str, Any] = {
-            "name": "mcp-debugger",
+            "name": "vibe-debug",
             "type": "python",
             "request": "attach",
             "justMyCode": False,
@@ -374,8 +374,8 @@ class DebugSession:
         self.client.request(
             "initialize",
             {
-                "clientID": "mcp-debugger",
-                "clientName": "MCP Debugger MCP",
+                "clientID": "vibe-debug",
+                "clientName": "Vibe Debug MCP",
                 "adapterID": "python",
                 "pathFormat": "path",
                 "linesStartAt1": True,

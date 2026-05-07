@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-AGENT_USAGE_GUIDANCE = """Use mcp-debugger when a Python bug has runtime behavior that static reading does not fully explain.
+AGENT_USAGE_GUIDANCE = """Use vibe-debug when a Python bug has runtime behavior that static reading does not fully explain.
 
 Prefer debugger tools when:
 - a test, script, or command reproduces the bug;
@@ -23,7 +23,7 @@ PROJECT_DEBUGGING_GUIDANCE = """# Debugging Workflow
 
 When a Python bug has a reproducible script, test, command, or request, prefer observing live runtime state before proposing a fix.
 
-Use the `mcp-debugger` MCP tools when:
+Use the `vibe-debug` MCP tools when:
 - the failure depends on branches, inputs, object state, or local variables;
 - source reading suggests multiple possible causes;
 - you are about to infer a variable value that can be observed directly.
