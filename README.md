@@ -75,6 +75,42 @@ claude mcp remove mcp-debugger -s user
 codex mcp remove mcp_debugger
 ```
 
+## Use Without MCP
+
+You can also run the debugger as a normal CLI from any coding agent shell. This avoids adding persistent MCP tools when you only need debugger state for a single bug:
+
+```bash
+npx -y github:illscience/mcp-debugger debug-python ./buggy_invoice.py --break ./buggy_invoice.py:13 --eval "subtotal * (1 - rate)"
+```
+
+Human output is concise:
+
+```text
+Stopped: buggy_invoice.py:13 in invoice_total
+Reason: breakpoint
+Locals:
+  customer_tier = 'gold'
+  rate = 0.15
+  subtotal = 120.0
+  total = 119.85
+Evaluations:
+  subtotal * (1 - rate) -> 102.0
+```
+
+Use `--json` when you want machine-readable output for an agent or script:
+
+```bash
+npx -y github:illscience/mcp-debugger debug-python ./buggy_invoice.py --break ./buggy_invoice.py:13 --eval "subtotal * (1 - rate)" --json
+```
+
+To help agents discover the CLI without keeping MCP tools enabled, add a lightweight project skill:
+
+```bash
+npx -y github:illscience/mcp-debugger init-cli-skill --target claude
+```
+
+That writes `.claude/skills/mcp-debugger/SKILL.md`: a short skill whose frontmatter explicitly triggers on reproducible Python bugs, failing Python tests/scripts, wrong output, exceptions, and logic errors where live runtime state would help. The skill body is CLI documentation for `debug-python`.
+
 ## Status
 
 This is an alpha release. The first debugger backend is Python via [`debugpy`](https://github.com/microsoft/debugpy); the MCP server is designed to grow to TypeScript/Node and other language runtimes.

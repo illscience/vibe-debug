@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import __version__
 from .agent_guidance import AGENT_USAGE_GUIDANCE, guidance_for_target
+from .session import DebugSession
 
 
 NPX_PACKAGE_SPEC = "github:illscience/mcp-debugger"
@@ -40,6 +41,50 @@ def main():
 
 if __name__ == "__main__":
     main()
+"""
+
+
+CLI_DISCOVERY_SKILL = """---
+name: mcp-debugger
+description: "Use when the user asks to debug, fix, explain, or diagnose a reproducible Python bug, failing Python script, failing Python test, wrong output, unexpected exception, or logic error where live runtime state could help. Trigger when a runnable Python repro exists or can be created and breakpoint locals, stack location, or expression evaluation would provide evidence. Do not use for non-Python bugs, pure style refactors, documentation-only tasks, or cases with no executable repro."
+---
+
+# MCP Debugger CLI
+
+Use the `mcp-debugger` CLI to observe live Python runtime state before proposing a fix.
+
+## Primary Command
+
+```bash
+npx -y github:illscience/mcp-debugger debug-python <script.py> --break <file.py>:<line> --json
+```
+
+Pick a breakpoint at the suspicious calculation, branch, return, assertion, or exception site. If no breakpoint is known yet, run with `--stop-on-entry --json`, inspect the code, then run again with a more useful breakpoint.
+
+## Useful Options
+
+- `--break <file.py>:<line>`: set a line breakpoint before running. Repeat for multiple breakpoints.
+- `--eval "<expr>"`: evaluate a side-effect-free expression in the paused frame. Repeat for multiple expressions.
+- `--arg "<value>"`: pass one argument to the target program. Repeat for multiple program arguments.
+- `--cwd <dir>`: run the target program from a specific working directory.
+- `--locals-limit <n>`: cap the number of locals returned.
+- `--json`: return compact machine-readable output.
+
+## Workflow
+
+1. Find or create the smallest Python command/script that reproduces the bug.
+2. Choose a breakpoint near the runtime behavior being diagnosed.
+3. Run `debug-python` with `--json`.
+4. Inspect `stopped`, `locals`, and `evaluations`.
+5. Cite observed runtime state in the final answer before proposing a fix.
+
+## Example
+
+```bash
+npx -y github:illscience/mcp-debugger debug-python buggy_invoice.py --break buggy_invoice.py:13 --eval "subtotal * (1 - rate)" --json
+```
+
+Use the result to explain what the program actually did, not only what the source appears to say.
 """
 
 
@@ -210,6 +255,27 @@ def _init_agent_files(target: str, directory: str, force: bool) -> int:
     return 0
 
 
+def _skill_path(target: str, directory: str) -> Path:
+    root = Path(directory).resolve()
+    if target == "claude":
+        return root / ".claude" / "skills" / "mcp-debugger" / "SKILL.md"
+    if target == "codex":
+        return root / ".codex" / "skills" / "mcp-debugger" / "SKILL.md"
+    raise ValueError(f"unknown target: {target}")
+
+
+def _init_cli_skill(target: str, directory: str, force: bool) -> int:
+    written: list[str] = []
+    for item in _targets(target):
+        path = _skill_path(item, directory)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_file(path, CLI_DISCOVERY_SKILL, force=force)
+        written.append(str(path))
+
+    print(json.dumps({"written": written}, indent=2))
+    return 0
+
+
 def _demo_prompt(target: str) -> str:
     if target == "claude":
         return 'claude -p "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files."'
@@ -237,6 +303,232 @@ def _demo_project(target: str, directory: str, force: bool) -> int:
             indent=2,
         )
     )
+    return 0
+
+
+def _parse_breakpoint(value: str) -> dict[str, object]:
+    file_name, separator, line_text = value.rpartition(":")
+    if not separator or not file_name or not line_text:
+        raise argparse.ArgumentTypeError("breakpoints must look like path/to/file.py:12")
+    try:
+        line = int(line_text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"breakpoint line must be an integer: {value}") from exc
+    if line <= 0:
+        raise argparse.ArgumentTypeError(f"breakpoint line must be positive: {value}")
+    return {"file": file_name, "line": line}
+
+
+def _source_location(location: object) -> str:
+    if not isinstance(location, dict):
+        return "unknown"
+    source = location.get("source")
+    path = ""
+    if isinstance(source, dict):
+        path = str(source.get("path") or source.get("name") or "")
+    line = location.get("line")
+    name = location.get("name")
+    if path and isinstance(line, int) and isinstance(name, str):
+        return f"{Path(path).name}:{line} in {name}"
+    if path and isinstance(line, int):
+        return f"{Path(path).name}:{line}"
+    if isinstance(name, str):
+        return name
+    return "unknown"
+
+
+def _location_summary(location: object) -> dict[str, object]:
+    if not isinstance(location, dict):
+        return {}
+    source = location.get("source")
+    path = ""
+    if isinstance(source, dict):
+        path = str(source.get("path") or "")
+    return {
+        "file": path,
+        "line": location.get("line"),
+        "function": location.get("name"),
+    }
+
+
+def _breakpoint_summaries(results: list[dict[str, object]]) -> list[dict[str, object]]:
+    summaries: list[dict[str, object]] = []
+    for result in results:
+        file_name = result.get("file")
+        breakpoints = result.get("breakpoints")
+        if not isinstance(file_name, str) or not isinstance(breakpoints, list):
+            continue
+        for breakpoint in breakpoints:
+            if not isinstance(breakpoint, dict):
+                continue
+            summaries.append(
+                {
+                    "file": file_name,
+                    "line": breakpoint.get("line"),
+                    "verified": bool(breakpoint.get("verified")),
+                }
+            )
+    return summaries
+
+
+def _local_summaries(snapshot: dict[str, object]) -> list[dict[str, object]]:
+    locals_ = snapshot.get("locals")
+    if not isinstance(locals_, list):
+        return []
+    summaries: list[dict[str, object]] = []
+    for item in locals_:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        value = item.get("value")
+        if not isinstance(name, str) or not isinstance(value, str):
+            continue
+        summary: dict[str, object] = {"name": name, "value": value}
+        type_name = item.get("type")
+        if isinstance(type_name, str):
+            summary["type"] = type_name
+        summaries.append(summary)
+    return summaries
+
+
+def _debug_python_payload(args: argparse.Namespace) -> dict[str, object]:
+    breakpoints = args.breakpoints or []
+    stop_on_entry = bool(args.stop_on_entry or not breakpoints)
+    session: DebugSession | None = None
+
+    try:
+        session = DebugSession.launch(
+            program=args.program,
+            args=args.program_args or [],
+            cwd=args.cwd,
+            python=args.python,
+            stop_on_entry=stop_on_entry,
+            timeout=float(args.timeout),
+        )
+        breakpoint_results = [
+            session.set_breakpoints(file=str(item["file"]), lines=[int(item["line"])], cwd=args.cwd)
+            for item in breakpoints
+        ]
+        stopped = session.continue_execution(timeout=float(args.timeout))
+        snapshot: dict[str, object] = {}
+        evaluations: list[dict[str, object]] = []
+
+        if stopped.get("state") == "stopped":
+            snapshot = session.top_frame_locals(limit=int(args.locals_limit))
+            for expression in args.evaluate or []:
+                try:
+                    result = session.evaluate(expression=expression)
+                    evaluations.append(
+                        {
+                            "expression": expression,
+                            "result": result.get("result"),
+                            "type": result.get("type"),
+                        }
+                    )
+                except Exception as exc:
+                    evaluations.append(
+                        {
+                            "expression": expression,
+                            "error": str(exc),
+                            "exceptionType": type(exc).__name__,
+                        }
+                    )
+
+        stopped_summary: dict[str, object] = {
+            "state": stopped.get("state"),
+            "event": stopped.get("event"),
+            "reason": stopped.get("stoppedReason"),
+        }
+        stopped_summary.update(_location_summary(stopped.get("location")))
+
+        return {
+            "ok": True,
+            "program": str(Path(args.program).resolve()),
+            "cwd": str(Path(args.cwd or os.getcwd()).resolve()),
+            "breakpoints": _breakpoint_summaries(breakpoint_results),
+            "stopped": stopped_summary,
+            "locals": _local_summaries(snapshot),
+            "evaluations": evaluations,
+        }
+    finally:
+        if session is not None:
+            try:
+                session.stop(terminate_debuggee=True)
+            except Exception:
+                pass
+
+
+def _print_debug_python_human(payload: dict[str, object]) -> None:
+    stopped = payload.get("stopped")
+    if isinstance(stopped, dict) and stopped.get("state") == "stopped":
+        location = {
+            "source": {"path": stopped.get("file")},
+            "line": stopped.get("line"),
+            "name": stopped.get("function"),
+        }
+        print(f"Stopped: {_source_location(location)}")
+        reason = stopped.get("reason")
+        if isinstance(reason, str):
+            print(f"Reason: {reason}")
+    elif isinstance(stopped, dict):
+        event = stopped.get("event") or stopped.get("state")
+        print(f"Stopped: no ({event})")
+    else:
+        print("Stopped: no")
+
+    locals_ = []
+    maybe_locals = payload.get("locals")
+    if isinstance(maybe_locals, list):
+        locals_ = [item for item in maybe_locals if isinstance(item, dict)]
+
+    if locals_:
+        print("Locals:")
+        for item in locals_:
+            name = item.get("name")
+            value = item.get("value")
+            if isinstance(name, str) and isinstance(value, str):
+                print(f"  {name} = {value}")
+    else:
+        print("Locals: none")
+
+    evaluations = payload.get("evaluations")
+    if isinstance(evaluations, list) and evaluations:
+        print("Evaluations:")
+        for item in evaluations:
+            if not isinstance(item, dict):
+                continue
+            expression = item.get("expression")
+            if not isinstance(expression, str):
+                continue
+            if "error" in item:
+                print(f"  {expression} -> ERROR: {item.get('error')}")
+            else:
+                print(f"  {expression} -> {item.get('result')}")
+
+
+def _debug_python(args: argparse.Namespace) -> int:
+    try:
+        payload = _debug_python_payload(args)
+    except Exception as exc:
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": str(exc),
+                        "exceptionType": type(exc).__name__,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(f"debug-python failed: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        _print_debug_python_human(payload)
     return 0
 
 
@@ -486,10 +778,43 @@ def main(argv: list[str] | None = None) -> int:
     init_files.add_argument("--target", choices=["claude", "codex", "both"], default="both")
     init_files.add_argument("--directory", default=".")
     init_files.add_argument("--force", action="store_true")
+    init_skill = subparsers.add_parser("init-cli-skill", help="Write a project skill that teaches agents the debugger CLI.")
+    init_skill.add_argument("--target", choices=["claude", "codex", "both"], default="claude")
+    init_skill.add_argument("--directory", default=".")
+    init_skill.add_argument("--force", action="store_true")
     demo = subparsers.add_parser("demo-project", help="Create a tiny prompt-based debugger demo project.")
     demo.add_argument("directory", nargs="?", default=".")
     demo.add_argument("--target", choices=["claude", "codex", "both"], default="claude")
     demo.add_argument("--force", action="store_true")
+    debug_python = subparsers.add_parser(
+        "debug-python",
+        help="Run a Python script under the debugger and print stopped-frame state.",
+    )
+    debug_python.add_argument("program", help="Python script to launch under debugpy.")
+    debug_python.add_argument(
+        "--arg",
+        dest="program_args",
+        action="append",
+        default=[],
+        help="Argument passed to the program.",
+    )
+    debug_python.add_argument(
+        "--break",
+        "-b",
+        dest="breakpoints",
+        action="append",
+        type=_parse_breakpoint,
+        default=[],
+        metavar="FILE:LINE",
+        help="Set a line breakpoint before continuing. Repeat for multiple breakpoints.",
+    )
+    debug_python.add_argument("--cwd", help="Working directory for the target program.")
+    debug_python.add_argument("--python", help="Python executable for debugpy and the target.")
+    debug_python.add_argument("--timeout", type=float, default=20.0)
+    debug_python.add_argument("--locals-limit", type=int, default=40)
+    debug_python.add_argument("--stop-on-entry", action="store_true")
+    debug_python.add_argument("--eval", dest="evaluate", action="append", default=[], help="Evaluate expression at stop.")
+    debug_python.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
     subparsers.add_parser("claude-progress", help="Format Claude Code stream-json output for humans.")
 
     args = parser.parse_args(argv)
@@ -505,8 +830,12 @@ def main(argv: list[str] | None = None) -> int:
         return _print_install(args.target)
     if args.command == "init-agent-files":
         return _init_agent_files(args.target, args.directory, args.force)
+    if args.command == "init-cli-skill":
+        return _init_cli_skill(args.target, args.directory, args.force)
     if args.command == "demo-project":
         return _demo_project(args.target, args.directory, args.force)
+    if args.command == "debug-python":
+        return _debug_python(args)
     if args.command == "claude-progress":
         return _format_claude_stream(sys.stdin, sys.stdout)
     parser.error(f"unknown command: {args.command}")

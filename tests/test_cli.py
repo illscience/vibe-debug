@@ -67,6 +67,24 @@ class CLITests(unittest.TestCase):
             payload = json.loads(output)
             self.assertEqual(len(payload["written"]), 2)
 
+    def test_init_cli_skill_writes_explicit_trigger_description_and_cli_docs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            code, output = call_cli(["init-cli-skill", "--directory", directory, "--target", "claude"])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(output)
+            path = Path(payload["written"][0])
+            self.assertEqual(path.name, "SKILL.md")
+            self.assertTrue(path.exists())
+            contents = path.read_text(encoding="utf-8")
+            self.assertIn("description:", contents)
+            self.assertIn("reproducible Python bug", contents)
+            self.assertIn("failing Python test", contents)
+            self.assertIn("Do not use for non-Python bugs", contents)
+            self.assertIn("debug-python <script.py>", contents)
+            self.assertIn("--break <file.py>:<line>", contents)
+            self.assertIn("--json", contents)
+
     def test_claude_install_snippet_uses_user_scope(self) -> None:
         code, output = call_cli(["install-snippet", "claude"])
 
@@ -80,6 +98,42 @@ class CLITests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("codex mcp add mcp_debugger", output)
         self.assertIn("npx -y github:illscience/mcp-debugger", output)
+
+    def test_debug_python_stops_and_prints_locals(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / "sample.py"
+            script.write_text(
+                "\n".join(
+                    [
+                        "def main():",
+                        "    x = 41",
+                        "    y = x + 1",
+                        "    print(y)",
+                        "",
+                        "if __name__ == '__main__':",
+                        "    main()",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            code, output = call_cli(
+                [
+                    "debug-python",
+                    str(script),
+                    "--break",
+                    f"{script}:4",
+                    "--eval",
+                    "y",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertIn("Stopped: sample.py:4 in main", output)
+        self.assertIn("x = 41", output)
+        self.assertIn("y = 42", output)
+        self.assertIn("y -> 42", output)
 
     def test_claude_progress_formats_debugger_events(self) -> None:
         events = [
