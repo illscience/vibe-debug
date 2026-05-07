@@ -15,15 +15,37 @@ coding agent
   -> your app
 ```
 
-## Install
+## Claude Code Skill Install
 
-### Claude Code
+Default path: install a lightweight project skill. This keeps debugger tools out of Claude's global MCP context and lets Claude discover the CLI when a Python bug needs runtime state.
+
+```bash
+npx -y github:illscience/vibe-debug doctor
+npx -y github:illscience/vibe-debug init-cli-skill --target claude
+```
+
+That writes `.claude/skills/vibe-debug/SKILL.md`: a short skill whose frontmatter explicitly triggers on reproducible Python bugs, failing Python tests/scripts, wrong output, exceptions, and logic errors where live runtime state would help. The skill body is CLI documentation for `debug-python`.
+
+## Codex Skill Install
+
+```bash
+npx -y github:illscience/vibe-debug doctor
+npx -y github:illscience/vibe-debug init-cli-skill --target codex
+```
+
+That writes `.codex/skills/vibe-debug/SKILL.md`.
+
+## Optional MCP Install
+
+MCP is still supported if you want debugger tools exposed directly to the agent.
+
+Claude Code:
 
 ```bash
 claude mcp add -s user vibe-debug -- npx -y github:illscience/vibe-debug
 ```
 
-### Codex
+Codex:
 
 ```bash
 codex mcp add vibe_debug -- npx -y github:illscience/vibe-debug
@@ -47,7 +69,7 @@ Use this stdio server config:
 }
 ```
 
-### Health Check
+### MCP Health Check
 
 The MCP server uses a small Python/debugpy cache behind the `npx` wrapper. Warm and verify it with:
 
@@ -58,7 +80,7 @@ npx -y github:illscience/vibe-debug doctor
 Expected output:
 
 ```text
-vibe-debug 0.2.1
+vibe-debug 0.2.2
 Python: ...
 debugpy import: ok
 MCP initialize: ok
@@ -66,7 +88,7 @@ MCP initialize: ok
 
 For the full machine-readable report, run `npx -y github:illscience/vibe-debug doctor --json`.
 
-### Disable
+### Disable MCP
 
 MCP tools are visible to the agent while the server is enabled. If you only want debugger tools for a specific project or debugging session, remove the MCP entry when you are done:
 
@@ -75,7 +97,7 @@ claude mcp remove vibe-debug -s user
 codex mcp remove vibe_debug
 ```
 
-## Use Without MCP
+## Use The CLI Directly
 
 You can also run the debugger as a normal CLI from any coding agent shell. This avoids adding persistent MCP tools when you only need debugger state for a single bug:
 
@@ -103,14 +125,6 @@ Use `--json` when you want machine-readable output for an agent or script:
 npx -y github:illscience/vibe-debug debug-python ./buggy_invoice.py --break ./buggy_invoice.py:13 --eval "subtotal * (1 - rate)" --json
 ```
 
-To help agents discover the CLI without keeping MCP tools enabled, add a lightweight project skill:
-
-```bash
-npx -y github:illscience/vibe-debug init-cli-skill --target claude
-```
-
-That writes `.claude/skills/vibe-debug/SKILL.md`: a short skill whose frontmatter explicitly triggers on reproducible Python bugs, failing Python tests/scripts, wrong output, exceptions, and logic errors where live runtime state would help. The skill body is CLI documentation for `debug-python`.
-
 ## Status
 
 This is an alpha release. The first debugger backend is Python via [`debugpy`](https://github.com/microsoft/debugpy); the MCP server is designed to grow to TypeScript/Node and other language runtimes.
@@ -123,7 +137,7 @@ npx -y @illscience/vibe-debug
 
 ## Optional Clean-Room Test
 
-This proves the MCP works the way people actually use it: from a normal bug-fixing prompt, not from a Python test script and not by explicitly telling the agent which debugger tool to call.
+This proves the default skill/CLI workflow works from a normal bug-fixing prompt, without installing the MCP and without explicitly telling the agent which debugger command to call.
 
 ### Claude Code
 
@@ -132,8 +146,8 @@ Paste this block:
 ```bash
 npx -y github:illscience/vibe-debug doctor
 
-claude mcp add -s user vibe-debug -- npx -y github:illscience/vibe-debug
-claude mcp get vibe-debug
+claude mcp remove vibe-debug -s local 2>/dev/null || true
+claude mcp remove vibe-debug -s user 2>/dev/null || true
 
 rm -rf /tmp/vibe-debug-claude-verify
 mkdir /tmp/vibe-debug-claude-verify
@@ -143,25 +157,19 @@ npx -y github:illscience/vibe-debug demo-project --target claude .
 claude -p --output-format stream-json --verbose "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files." | npx -y github:illscience/vibe-debug claude-progress
 ```
 
-If you previously installed an old version, reset first:
-
-```bash
-claude mcp remove vibe-debug -s local 2>/dev/null || true
-claude mcp remove vibe-debug -s user 2>/dev/null || true
-```
-
 The `demo-project` command creates:
 
 - `buggy_invoice.py`: a tiny Python program with a real arithmetic bug.
-- `CLAUDE.md`: Claude Code project memory that says to use live runtime debugging when a reproducible bug has observable runtime state.
+- `CLAUDE.md`: Claude Code project memory that says to prefer live runtime debugging for reproducible bugs.
+- `.claude/skills/vibe-debug/SKILL.md`: the local skill that teaches Claude the CLI workflow.
 
 Claude Code loads project instructions from `./CLAUDE.md` ([Anthropic docs](https://docs.anthropic.com/en/docs/claude-code/memory)). `vibe-debug` can create that file for you in a test project, as shown above.
 
-You should see `vibe-debug` listed as connected, starting, or active and, on a successful debugger-assisted run, a tool call such as `mcp__vibe-debug__debug_python_repro`.
-
 What you want to see:
 
-- Claude calls the `vibe-debug` MCP server, usually starting with `debug_python_repro`.
+- Claude uses the `vibe-debug` skill and runs `npx -y github:illscience/vibe-debug debug-python ...`.
+- The progress formatter shows `Tool: Bash (vibe-debug debug-python)`.
+- The progress formatter shows a stopped location near `buggy_invoice.py:13`.
 - Claude reports runtime values such as `subtotal = 120.0`, `customer_tier = 'gold'`, and `rate = 0.15`.
 - Claude explains that the program subtracts `0.15` directly instead of subtracting `120.0 * 0.15`.
 - Claude proposes `total = subtotal * (1 - rate)` or `total = subtotal - (subtotal * rate)`.
@@ -171,8 +179,7 @@ What you want to see:
 ```bash
 npx -y github:illscience/vibe-debug doctor
 
-codex mcp add vibe_debug -- npx -y github:illscience/vibe-debug
-codex mcp get vibe_debug
+codex mcp remove vibe_debug 2>/dev/null || true
 
 rm -rf /tmp/vibe-debug-codex
 mkdir /tmp/vibe-debug-codex
@@ -181,15 +188,19 @@ npx -y github:illscience/vibe-debug demo-project --target codex .
 codex exec "There is a bug in buggy_invoice.py. Figure out what is wrong and propose the fix. Do not edit files."
 ```
 
-If you previously tried an old version, reset first:
+The key proof is the transcript: the agent should use `vibe-debug` from a normal debugging request and cite observed runtime state in its answer.
+
+## What The Skill Teaches
+
+The project skill teaches the agent to run:
 
 ```bash
-codex mcp remove vibe_debug 2>/dev/null || true
+npx -y github:illscience/vibe-debug debug-python <script.py> --break <file.py>:<line> --json
 ```
 
-The key proof is the transcript: the agent should use debugger tools from a normal debugging request and cite observed runtime state in its answer.
+The CLI launches the target script under `debugpy`, stops at the requested breakpoint, and returns the stopped location, locals, and optional expression evaluations.
 
-## What The Agent Sees
+## Optional MCP Tools
 
 The MCP server exposes agent-friendly workflow tools and lower-level debugger primitives.
 
@@ -266,7 +277,7 @@ def apply_discount(price, loyalty_level):
     return round(discounted, 2)
 ```
 
-Codex can call `debug_python_repro`, stop at the breakpoint, step into `apply_discount`, inspect locals, and observe:
+An agent can run `vibe-debug debug-python`, stop at the breakpoint, inspect locals, and observe:
 
 ```text
 price = 120.0
@@ -286,7 +297,7 @@ The correct total is 102.0, not 119.85.
 
 ## How To Make Agents Use It Naturally
 
-MCP makes the debugger available, but the agent still needs a workflow preference that says runtime bugs should be investigated with live runtime state when possible.
+The project skill makes the CLI discoverable, but the agent still needs a workflow preference that says runtime bugs should be investigated with live runtime state when possible.
 
 For Claude Code, use `CLAUDE.md`. Anthropic documents `./CLAUDE.md` as project memory that Claude Code loads automatically.
 
@@ -295,6 +306,9 @@ For Codex, use `AGENTS.md`.
 Create the right file in a target project:
 
 ```bash
+npx -y github:illscience/vibe-debug init-cli-skill --target claude
+npx -y github:illscience/vibe-debug init-cli-skill --target codex
+npx -y github:illscience/vibe-debug init-cli-skill --target both
 npx -y github:illscience/vibe-debug init-agent-files --target claude
 npx -y github:illscience/vibe-debug init-agent-files --target codex
 npx -y github:illscience/vibe-debug init-agent-files --target both
@@ -313,7 +327,7 @@ The key instruction:
 When a Python bug has a reproducible script, test, command, or request, prefer observing live runtime state before proposing a fix.
 ```
 
-The high-level `debug_python_repro` tool is intentionally named and described so agents can pick it before reaching for raw debugger operations.
+The skill frontmatter is intentionally explicit so agents can load it when a Python bug has observable runtime state.
 
 ## Development
 

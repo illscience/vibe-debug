@@ -49,11 +49,13 @@ class CLITests(unittest.TestCase):
             self.assertEqual(code, 0)
             root = Path(directory)
             self.assertTrue((root / "CLAUDE.md").exists())
+            self.assertTrue((root / ".claude" / "skills" / "vibe-debug" / "SKILL.md").exists())
             self.assertTrue((root / "buggy_invoice.py").exists())
-            self.assertIn("debug_python_repro", (root / "CLAUDE.md").read_text())
+            self.assertIn("vibe-debug", (root / "CLAUDE.md").read_text())
+            self.assertIn("debug-python <script.py>", (root / ".claude" / "skills" / "vibe-debug" / "SKILL.md").read_text())
             self.assertIn("actual_total", (root / "buggy_invoice.py").read_text())
             payload = json.loads(output)
-            self.assertEqual(payload["created"], ["CLAUDE.md", "buggy_invoice.py"])
+            self.assertEqual(payload["created"], [".claude/skills/vibe-debug/SKILL.md", "CLAUDE.md", "buggy_invoice.py"])
             self.assertIn("claude -p", payload["next"][0])
 
     def test_init_agent_files_can_target_both_agents(self) -> None:
@@ -223,6 +225,63 @@ class CLITests(unittest.TestCase):
         output = output_stream.getvalue()
         self.assertIn("MCP: vibe-debug connected", output)
         self.assertIn("Tool: vibe-debug.debug_python_repro (buggy_invoice.py)", output)
+        self.assertIn("Stopped: buggy_invoice.py:13 in invoice_total", output)
+        self.assertIn("Locals: subtotal=120.0 rate=0.15 total=119.85", output)
+        self.assertIn("Eval: subtotal * (1 - rate) -> 102.0", output)
+
+    def test_claude_progress_formats_vibe_debug_cli_json_from_bash(self) -> None:
+        events = [
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tool-1",
+                            "name": "Bash",
+                            "input": {
+                                "command": "npx -y github:illscience/vibe-debug debug-python buggy_invoice.py --break buggy_invoice.py:13 --json",
+                                "description": "Run debugger",
+                            },
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tool-1",
+                            "content": json.dumps(
+                                {
+                                    "stopped": {
+                                        "file": "/tmp/demo/buggy_invoice.py",
+                                        "line": 13,
+                                        "function": "invoice_total",
+                                    },
+                                    "locals": [
+                                        {"name": "subtotal", "value": "120.0"},
+                                        {"name": "rate", "value": "0.15"},
+                                        {"name": "total", "value": "119.85"},
+                                    ],
+                                    "evaluations": [
+                                        {"expression": "subtotal * (1 - rate)", "result": "102.0"}
+                                    ],
+                                }
+                            ),
+                        }
+                    ]
+                },
+            },
+        ]
+        input_stream = StringIO("\n".join(json.dumps(event) for event in events))
+        output_stream = StringIO()
+
+        self.assertEqual(_format_claude_stream(input_stream, output_stream), 0)
+        output = output_stream.getvalue()
+        self.assertIn("Tool: Bash (vibe-debug debug-python)", output)
         self.assertIn("Stopped: buggy_invoice.py:13 in invoice_total", output)
         self.assertIn("Locals: subtotal=120.0 rate=0.15 total=119.85", output)
         self.assertIn("Eval: subtotal * (1 - rate) -> 102.0", output)

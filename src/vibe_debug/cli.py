@@ -242,6 +242,10 @@ def _write_file(path: Path, contents: str, force: bool) -> None:
     path.write_text(contents, encoding="utf-8")
 
 
+def _relative_files(root: Path) -> list[str]:
+    return sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file())
+
+
 def _init_agent_files(target: str, directory: str, force: bool) -> int:
     root = Path(directory).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -292,13 +296,16 @@ def _demo_project(target: str, directory: str, force: bool) -> int:
 
     for item in _targets(target):
         _write_file(root / _agent_filename(item), guidance_for_target(item), force=force)
+        skill_path = _skill_path(item, str(root))
+        skill_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_file(skill_path, CLI_DISCOVERY_SKILL, force=force)
 
     prompts = [_demo_prompt(item) for item in _targets(target)]
     print(
         json.dumps(
             {
                 "project": str(root),
-                "created": sorted(path.name for path in root.iterdir() if path.is_file()),
+                "created": _relative_files(root),
                 "next": prompts,
             },
             indent=2,
@@ -580,6 +587,9 @@ def _format_tool_use(name: str, tool_input: object) -> str:
         if file_path:
             return f"Tool: Read ({file_path})"
     if name == "Bash":
+        command = tool_input.get("command")
+        if isinstance(command, str) and "vibe-debug" in command and "debug-python" in command:
+            return "Tool: Bash (vibe-debug debug-python)"
         description = tool_input.get("description")
         if isinstance(description, str) and description:
             return f"Tool: Bash ({description})"
@@ -623,10 +633,21 @@ def _format_debugger_result(payload: object, tool_name: str | None) -> list[str]
             if isinstance(name, str) and isinstance(line, int):
                 prefix = f"{file_name}:" if file_name else ""
                 lines.append(f"Stopped: {prefix}{line} in {name}")
+        else:
+            file_name = _basename(stopped.get("file"))
+            name = stopped.get("function")
+            line = stopped.get("line")
+            if isinstance(name, str) and isinstance(line, int):
+                prefix = f"{file_name}:" if file_name else ""
+                lines.append(f"Stopped: {prefix}{line} in {name}")
 
     snapshot = data.get("snapshot")
     if isinstance(snapshot, dict):
         locals_line = _format_locals(snapshot.get("locals"))
+        if locals_line:
+            lines.append(locals_line)
+    else:
+        locals_line = _format_locals(data.get("locals"))
         if locals_line:
             lines.append(locals_line)
 
@@ -634,6 +655,16 @@ def _format_debugger_result(payload: object, tool_name: str | None) -> list[str]
     result = data.get("result")
     if isinstance(expression, str) and isinstance(result, str):
         lines.append(f"Eval: {expression} -> {result}")
+
+    evaluations = data.get("evaluations")
+    if isinstance(evaluations, list):
+        for item in evaluations:
+            if not isinstance(item, dict):
+                continue
+            expression = item.get("expression")
+            result = item.get("result")
+            if isinstance(expression, str) and result is not None:
+                lines.append(f"Eval: {expression} -> {result}")
 
     state = data.get("state")
     if tool_name and tool_name.endswith("__debug_stop") and isinstance(state, str):
