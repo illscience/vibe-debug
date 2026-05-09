@@ -1,8 +1,26 @@
 from __future__ import annotations
 
 import unittest
+from typing import Any
 
 from vibe_debug.mcp_server import MCPDebuggerServer
+
+
+class FakeSession:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def set_breakpoints(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(kwargs)
+        return {"ok": True}
+
+
+class FakeManager:
+    def __init__(self) -> None:
+        self.session = FakeSession()
+
+    def get(self, session_id: str) -> FakeSession:
+        return self.session
 
 
 class MCPServerTests(unittest.TestCase):
@@ -27,6 +45,38 @@ class MCPServerTests(unittest.TestCase):
         self.assertIn("debug_set_breakpoints", tools)
         self.assertIn("debug_step", tools)
         self.assertIn("debug_variables", tools)
+
+        set_breakpoints = next(tool for tool in listed["result"]["tools"] if tool["name"] == "debug_set_breakpoints")
+        entries = set_breakpoints["inputSchema"]["properties"]["entries"]
+        self.assertEqual(entries["items"]["properties"]["logMessage"]["type"], "string")
+
+    def test_debug_set_breakpoints_accepts_logpoint_entries(self) -> None:
+        server = MCPDebuggerServer()
+        manager = FakeManager()
+        server.manager = manager  # type: ignore[assignment]
+
+        result = server._debug_set_breakpoints(
+            {
+                "sessionId": "session-1",
+                "file": "sample.py",
+                "entries": [{"line": 5, "logMessage": "x={x}"}],
+            }
+        )
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(
+            manager.session.calls,
+            [
+                {
+                    "file": "sample.py",
+                    "lines": [5],
+                    "cwd": None,
+                    "conditions": [None],
+                    "hit_conditions": [None],
+                    "log_messages": ["x={x}"],
+                }
+            ],
+        )
 
 
 if __name__ == "__main__":

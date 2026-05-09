@@ -125,6 +125,16 @@ Use `--json` when you want machine-readable output for an agent or script:
 npx -y github:illscience/vibe-debug debug-python ./buggy_invoice.py --break ./buggy_invoice.py:13 --eval "subtotal * (1 - rate)" --json
 ```
 
+Use `--log` for non-pausing logpoints. The message uses debugpy expression interpolation, so `{name}` is evaluated in the breakpoint frame:
+
+```bash
+npx -y github:illscience/vibe-debug debug-python ./buggy_invoice.py \
+  --log './buggy_invoice.py:13 | rate={rate} discounted={discounted}' \
+  --break ./buggy_invoice.py:20
+```
+
+Logpoint hits are returned in the JSON `logs` array and printed in a `Logs:` section for human output.
+
 ## Status
 
 This is an alpha release. The first debugger backend is Python via [`debugpy`](https://github.com/microsoft/debugpy); the MCP server is designed to grow to TypeScript/Node and other language runtimes.

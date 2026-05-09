@@ -65,6 +65,7 @@ Pick a breakpoint at the suspicious calculation, branch, return, assertion, or e
 ## Useful Options
 
 - `--break <file.py>:<line>`: set a line breakpoint before running. Repeat for multiple breakpoints.
+- `--log <file.py>:<line> | <message>`: emit a logpoint message without pausing. Use `{expr}` for substitution.
 - `--eval "<expr>"`: evaluate a side-effect-free expression in the paused frame. Repeat for multiple expressions.
 - `--arg "<value>"`: pass one argument to the target program. Repeat for multiple program arguments.
 - `--cwd <dir>`: run the target program from a specific working directory.
@@ -327,6 +328,18 @@ def _parse_breakpoint(value: str) -> dict[str, object]:
     return {"file": file_name, "line": line}
 
 
+def _parse_logpoint(value: str) -> dict[str, object]:
+    location, separator, message = value.partition("|")
+    if not separator:
+        raise argparse.ArgumentTypeError("logpoints must look like 'path/to/file.py:12 | message {expr}'")
+    breakpoint = _parse_breakpoint(location.strip())
+    message = message.strip()
+    if not message:
+        raise argparse.ArgumentTypeError("logpoint message must not be empty")
+    breakpoint["logMessage"] = message
+    return breakpoint
+
+
 def _source_location(location: object) -> str:
     if not isinstance(location, dict):
         return "unknown"
@@ -399,9 +412,19 @@ def _local_summaries(snapshot: dict[str, object]) -> list[dict[str, object]]:
     return summaries
 
 
+def _breakpoints_by_file(items: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for item in items:
+        file_name = str(item["file"])
+        grouped.setdefault(file_name, []).append(item)
+    return grouped
+
+
 def _debug_python_payload(args: argparse.Namespace) -> dict[str, object]:
     breakpoints = args.breakpoints or []
-    stop_on_entry = bool(args.stop_on_entry or not breakpoints)
+    logpoints = args.logpoints or []
+    configured_points = [*breakpoints, *logpoints]
+    stop_on_entry = bool(args.stop_on_entry or not configured_points)
     session: DebugSession | None = None
 
     try:
@@ -413,11 +436,21 @@ def _debug_python_payload(args: argparse.Namespace) -> dict[str, object]:
             stop_on_entry=stop_on_entry,
             timeout=float(args.timeout),
         )
-        breakpoint_results = [
-            session.set_breakpoints(file=str(item["file"]), lines=[int(item["line"])], cwd=args.cwd)
-            for item in breakpoints
-        ]
+        breakpoint_results: list[dict[str, object]] = []
+        for file_name, items in _breakpoints_by_file(configured_points).items():
+            breakpoint_results.append(
+                session.set_breakpoints(
+                    file=file_name,
+                    lines=[int(item["line"]) for item in items],
+                    cwd=args.cwd,
+                    log_messages=[
+                        str(item["logMessage"]) if isinstance(item.get("logMessage"), str) else None
+                        for item in items
+                    ],
+                )
+            )
         stopped = session.continue_execution(timeout=float(args.timeout))
+        logs = session.drain_logpoints()
         snapshot: dict[str, object] = {}
         evaluations: list[dict[str, object]] = []
 
@@ -455,6 +488,7 @@ def _debug_python_payload(args: argparse.Namespace) -> dict[str, object]:
             "cwd": str(Path(args.cwd or os.getcwd()).resolve()),
             "breakpoints": _breakpoint_summaries(breakpoint_results),
             "stopped": stopped_summary,
+            "logs": logs,
             "locals": _local_summaries(snapshot),
             "evaluations": evaluations,
         }
@@ -467,6 +501,18 @@ def _debug_python_payload(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _print_debug_python_human(payload: dict[str, object]) -> None:
+    logs = payload.get("logs")
+    if isinstance(logs, list) and logs:
+        print("Logs:")
+        for item in logs:
+            if not isinstance(item, dict):
+                continue
+            file_name = item.get("file")
+            line = item.get("line")
+            message = item.get("message")
+            if isinstance(file_name, str) and isinstance(line, int) and isinstance(message, str):
+                print(f"  {Path(file_name).name}:{line} | {message}")
+
     stopped = payload.get("stopped")
     if isinstance(stopped, dict) and stopped.get("state") == "stopped":
         location = {
@@ -844,6 +890,15 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         metavar="FILE:LINE",
         help="Set a line breakpoint before continuing. Repeat for multiple breakpoints.",
+    )
+    debug_python.add_argument(
+        "--log",
+        dest="logpoints",
+        action="append",
+        type=_parse_logpoint,
+        default=[],
+        metavar="FILE:LINE | MESSAGE",
+        help="Set a non-pausing log breakpoint. Use {expr} for substitution.",
     )
     debug_python.add_argument("--cwd", help="Working directory for the target program.")
     debug_python.add_argument("--python", help="Python executable for debugpy and the target.")

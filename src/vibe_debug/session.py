@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -9,7 +10,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Pattern
 
 from .dap import DAPClient, DAPEvent
 
@@ -60,6 +61,9 @@ class DebugSession:
     stopped_thread_id: int | None = None
     launch_request_seq: int | None = None
     event_cursor: int = 0
+    log_event_cursor: int = 0
+    logpoint_locations: set[tuple[str, int]] = field(default_factory=set)
+    logpoint_templates: list[tuple[str, int, str, Pattern[str]]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -151,13 +155,39 @@ class DebugSession:
         session.state = "configuring"
         return session
 
-    def set_breakpoints(self, file: str, lines: list[int], cwd: str | None = None) -> dict[str, Any]:
+    def set_breakpoints(
+        self,
+        file: str,
+        lines: list[int],
+        cwd: str | None = None,
+        conditions: list[str | None] | None = None,
+        hit_conditions: list[str | None] | None = None,
+        log_messages: list[str | None] | None = None,
+    ) -> dict[str, Any]:
         path = _normalize_path(file, cwd)
+        breakpoints: list[dict[str, Any]] = []
+        self.logpoint_locations = {item for item in self.logpoint_locations if item[0] != path}
+        self.logpoint_templates = [item for item in self.logpoint_templates if item[0] != path]
+        for index, line in enumerate(lines):
+            breakpoint: dict[str, Any] = {"line": int(line)}
+            if conditions and index < len(conditions) and conditions[index]:
+                breakpoint["condition"] = conditions[index]
+            if hit_conditions and index < len(hit_conditions) and hit_conditions[index]:
+                breakpoint["hitCondition"] = hit_conditions[index]
+            if log_messages and index < len(log_messages) and log_messages[index]:
+                log_message = log_messages[index]
+                breakpoint["logMessage"] = log_message
+                self.logpoint_locations.add((path, int(line)))
+                self.logpoint_templates.append(
+                    (path, int(line), log_message, _logpoint_output_pattern(log_message))
+                )
+            breakpoints.append(breakpoint)
+
         body = self.client.request(
             "setBreakpoints",
             {
                 "source": {"path": path},
-                "breakpoints": [{"line": int(line)} for line in lines],
+                "breakpoints": breakpoints,
                 "sourceModified": False,
             },
         )
@@ -167,6 +197,20 @@ class DebugSession:
             "file": path,
             "breakpoints": body.get("breakpoints", []),
         }
+
+    def drain_logpoints(self) -> list[dict[str, Any]]:
+        events = self.client.events
+        pending = events[self.log_event_cursor :]
+        self.log_event_cursor = len(events)
+
+        logs: list[dict[str, Any]] = []
+        for event in pending:
+            if event.event != "output":
+                continue
+            log = self._logpoint_summary(event)
+            if log:
+                logs.append(log)
+        return logs
 
     def continue_execution(self, timeout: float = 15.0) -> dict[str, Any]:
         if self.state == "configuring":
@@ -433,6 +477,59 @@ class DebugSession:
                 "path": source.get("path"),
             },
         }
+
+    def _logpoint_summary(self, event: DAPEvent) -> dict[str, Any] | None:
+        category = event.body.get("category")
+        if category not in {"console", "stdout"}:
+            return None
+
+        source = event.body.get("source")
+        output = event.body.get("output")
+        if not isinstance(output, str):
+            return None
+        message = output.rstrip("\r\n")
+
+        if not isinstance(source, dict):
+            return None
+        source_path = source.get("path")
+        line = event.body.get("line")
+        if not isinstance(source_path, str) or not isinstance(line, int):
+            return self._template_logpoint_summary(message, event.body)
+
+        path = _normalize_path(source_path)
+        if (path, line) not in self.logpoint_locations:
+            return None
+
+        log: dict[str, Any] = {
+            "file": path,
+            "line": line,
+            "message": message,
+        }
+        thread_id = event.body.get("threadId")
+        if isinstance(thread_id, int):
+            log["thread_id"] = thread_id
+        return log
+
+    def _template_logpoint_summary(self, message: str, body: dict[str, Any]) -> dict[str, Any] | None:
+        for path, line, _template, pattern in self.logpoint_templates:
+            if not pattern.match(message):
+                continue
+            log: dict[str, Any] = {
+                "file": path,
+                "line": line,
+                "message": message,
+            }
+            thread_id = body.get("threadId")
+            if isinstance(thread_id, int):
+                log["thread_id"] = thread_id
+            return log
+        return None
+
+
+def _logpoint_output_pattern(message: str) -> Pattern[str]:
+    parts = re.split(r"(\{[^{}]+\})", message)
+    pattern = "".join(".*" if part.startswith("{") and part.endswith("}") else re.escape(part) for part in parts)
+    return re.compile(f"^{pattern}$")
 
 
 class DebugSessionManager:
