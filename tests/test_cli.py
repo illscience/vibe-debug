@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import tempfile
 import unittest
@@ -7,7 +8,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 
-from vibe_debug.cli import _format_claude_stream, main
+from vibe_debug.cli import _format_claude_stream, _parse_logpoint, main
 
 
 def call_cli(args: list[str]) -> tuple[int, str]:
@@ -136,6 +137,51 @@ class CLITests(unittest.TestCase):
         self.assertIn("x = 41", output)
         self.assertIn("y = 42", output)
         self.assertIn("y -> 42", output)
+
+    def test_debug_python_logs_and_stops_at_breakpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / "sample.py"
+            script.write_text(
+                "\n".join(
+                    [
+                        "def main():",
+                        "    seen = []",
+                        "    for i in range(3):",
+                        "        value = i * 10",
+                        "        seen.append(value)",
+                        "    print(seen)",
+                        "",
+                        "if __name__ == '__main__':",
+                        "    main()",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            code, output = call_cli(
+                [
+                    "debug-python",
+                    str(script),
+                    "--log",
+                    f"{script}:5 | i={{i}} value={{value}}",
+                    "--break",
+                    f"{script}:6",
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        payload = json.loads(output)
+        self.assertEqual(payload["stopped"]["line"], 6)
+        self.assertEqual(
+            [item["message"] for item in payload["logs"]],
+            ["i=0 value=0", "i=1 value=10", "i=2 value=20"],
+        )
+
+    def test_parse_logpoint_requires_separator(self) -> None:
+        with self.assertRaises(argparse.ArgumentTypeError):
+            _parse_logpoint("sample.py:5 missing separator")
 
     def test_claude_progress_formats_debugger_events(self) -> None:
         events = [

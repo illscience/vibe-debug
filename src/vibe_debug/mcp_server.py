@@ -55,6 +55,9 @@ def _tool_definitions() -> list[dict[str, Any]]:
                             "properties": {
                                 "file": {"type": "string"},
                                 "line": {"type": "integer"},
+                                "condition": {"type": "string"},
+                                "hitCondition": {"type": "string"},
+                                "logMessage": {"type": "string"},
                             },
                             "required": ["file", "line"],
                             "additionalProperties": False,
@@ -118,15 +121,30 @@ def _tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "debug_set_breakpoints",
-            "description": "Set one or more line breakpoints in a Python source file.",
+            "description": "Set one or more line breakpoints or logpoints in a Python source file.",
             "inputSchema": _schema(
                 {
                     "sessionId": {"type": "string"},
                     "file": {"type": "string"},
                     "lines": {"type": "array", "items": {"type": "integer"}},
+                    "entries": {
+                        "type": "array",
+                        "description": "Breakpoint objects. Use logMessage for non-pausing logpoints.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "line": {"type": "integer"},
+                                "condition": {"type": "string"},
+                                "hitCondition": {"type": "string"},
+                                "logMessage": {"type": "string"},
+                            },
+                            "required": ["line"],
+                            "additionalProperties": False,
+                        },
+                    },
                     "cwd": {"type": "string"},
                 },
-                ["sessionId", "file", "lines"],
+                ["sessionId", "file"],
             ),
         },
         {
@@ -356,16 +374,10 @@ class MCPDebuggerServer:
         session = self.manager.get(session_id)
         breakpoint_results: list[dict[str, Any]] = []
 
-        for item in args.get("breakpoints") or []:
-            breakpoint_results.append(
-                session.set_breakpoints(
-                    file=item["file"],
-                    lines=[int(item["line"])],
-                    cwd=args.get("cwd"),
-                )
-            )
+        breakpoint_results = self._set_breakpoint_items(session, args.get("breakpoints") or [], args.get("cwd"))
 
         stopped = session.continue_execution(timeout=timeout)
+        logs = session.drain_logpoints()
         snapshot: dict[str, Any] = {}
         if stopped.get("state") == "stopped":
             snapshot = session.top_frame_locals(limit=int(args.get("locals_limit", 40)))
@@ -378,6 +390,7 @@ class MCPDebuggerServer:
             "launch": launch,
             "breakpoints": breakpoint_results,
             "stopped": stopped,
+            "logs": logs,
             "snapshot": snapshot,
             "nextActions": [
                 "Use debug_step to move over/into/out from the current line.",
@@ -395,14 +408,73 @@ class MCPDebuggerServer:
         )
 
     def _debug_set_breakpoints(self, args: dict[str, Any]) -> dict[str, Any]:
+        lines = args.get("lines")
+        entries = args.get("entries")
+        if (lines is None) == (entries is None):
+            raise ValueError("provide exactly one of lines or entries")
+
+        if entries is not None:
+            if not isinstance(entries, list):
+                raise ValueError("entries must be an array")
+            return self.manager.get(args["sessionId"]).set_breakpoints(
+                file=args["file"],
+                lines=[int(item["line"]) for item in entries],
+                cwd=args.get("cwd"),
+                conditions=[
+                    item.get("condition") if isinstance(item.get("condition"), str) else None for item in entries
+                ],
+                hit_conditions=[
+                    item.get("hitCondition") if isinstance(item.get("hitCondition"), str) else None for item in entries
+                ],
+                log_messages=[
+                    item.get("logMessage") if isinstance(item.get("logMessage"), str) else None for item in entries
+                ],
+            )
+
         return self.manager.get(args["sessionId"]).set_breakpoints(
             file=args["file"],
-            lines=[int(line) for line in args["lines"]],
+            lines=[int(line) for line in lines],
             cwd=args.get("cwd"),
         )
 
     def _debug_continue(self, args: dict[str, Any]) -> dict[str, Any]:
-        return self.manager.get(args["sessionId"]).continue_execution(timeout=float(args.get("timeout", 15)))
+        session = self.manager.get(args["sessionId"])
+        result = session.continue_execution(timeout=float(args.get("timeout", 15)))
+        result["logs"] = session.drain_logpoints()
+        return result
+
+    def _set_breakpoint_items(
+        self,
+        session: Any,
+        items: list[dict[str, Any]],
+        cwd: str | None,
+    ) -> list[dict[str, Any]]:
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for item in items:
+            grouped.setdefault(str(item["file"]), []).append(item)
+
+        results: list[dict[str, Any]] = []
+        for file_name, file_items in grouped.items():
+            results.append(
+                session.set_breakpoints(
+                    file=file_name,
+                    lines=[int(item["line"]) for item in file_items],
+                    cwd=cwd,
+                    conditions=[
+                        item.get("condition") if isinstance(item.get("condition"), str) else None
+                        for item in file_items
+                    ],
+                    hit_conditions=[
+                        item.get("hitCondition") if isinstance(item.get("hitCondition"), str) else None
+                        for item in file_items
+                    ],
+                    log_messages=[
+                        item.get("logMessage") if isinstance(item.get("logMessage"), str) else None
+                        for item in file_items
+                    ],
+                )
+            )
+        return results
 
     def _debug_step(self, args: dict[str, Any]) -> dict[str, Any]:
         return self.manager.get(args["sessionId"]).step(
