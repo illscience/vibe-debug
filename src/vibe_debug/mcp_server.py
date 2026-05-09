@@ -173,6 +173,18 @@ def _tool_definitions() -> list[dict[str, Any]]:
             ),
         },
         {
+            "name": "debug_attach_typescript",
+            "description": "Attach to an already-listening Node inspector process on localhost or another explicit host.",
+            "inputSchema": _schema(
+                {
+                    "host": {"type": "string", "default": "127.0.0.1"},
+                    "port": {"type": "integer"},
+                    "timeout": {"type": "number", "default": 15},
+                },
+                ["port"],
+            ),
+        },
+        {
             "name": "debug_set_breakpoints",
             "description": "Set one or more line breakpoints in a source file.",
             "inputSchema": _schema(
@@ -281,6 +293,7 @@ class MCPDebuggerServer:
             "debug_typescript_repro": self._debug_typescript_repro,
             "debug_launch": self._debug_launch,
             "debug_attach": self._debug_attach,
+            "debug_attach_typescript": self._debug_attach_typescript,
             "debug_set_breakpoints": self._debug_set_breakpoints,
             "debug_continue": self._debug_continue,
             "debug_step": self._debug_step,
@@ -299,6 +312,7 @@ class MCPDebuggerServer:
             "primitiveTools": [
                 "debug_launch",
                 "debug_attach",
+                "debug_attach_typescript",
                 "debug_set_breakpoints",
                 "debug_continue",
                 "debug_step",
@@ -515,6 +529,13 @@ class MCPDebuggerServer:
             port=int(args["port"]),
             timeout=float(args.get("timeout", 15)),
             path_mappings=args.get("path_mappings"),
+        )
+
+    def _debug_attach_typescript(self, args: dict[str, Any]) -> dict[str, Any]:
+        return self.node_manager.attach(
+            host=args.get("host") or "127.0.0.1",
+            port=int(args["port"]),
+            timeout=float(args.get("timeout", 15)),
         )
 
     def _debug_set_breakpoints(self, args: dict[str, Any]) -> dict[str, Any]:

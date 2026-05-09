@@ -12,7 +12,7 @@ Prefer live debugger state when:
 
 Recommended workflow:
 1. If a vibe-debug skill is available, use its CLI workflow first.
-2. Run `debug-python` for Python scripts/tests, `debug-typescript` for TypeScript/JavaScript scripts, `debug-request` for a local Python HTTP request, or `attach-python` for an existing debugpy listener.
+2. Run `debug-python` for Python scripts/tests, `debug-typescript` for TypeScript/JavaScript scripts, `debug-request` for a local Python HTTP request, `attach-python` for an existing debugpy listener, or `attach-typescript` for an existing Node inspector listener.
 3. If the MCP server is installed, use `debug_python_repro` for Python script repros or `debug_typescript_repro` for TypeScript/JavaScript script repros.
 4. Inspect stopped location, locals, and evaluations before editing code.
 
@@ -41,9 +41,10 @@ Recommended workflow:
 3. Run `npx -y github:illscience/vibe-debug debug-typescript <script.ts> --break <file.ts>:<line> --json` for TypeScript/JavaScript scripts.
 4. For local Python web requests, run `npx -y github:illscience/vibe-debug debug-request <server.py> --url <local-url> --break <file.py>:<line> --json`.
 5. For an existing debugpy listener, run `npx -y github:illscience/vibe-debug attach-python --port <port> --break <file.py>:<line> --json`.
-6. Inspect the stopped location, locals, and evaluations.
-7. Use `--eval` only for read-style expressions; it can execute code in the debuggee.
-8. If an MCP server named `vibe-debug` is installed, `debug_python_repro` and `debug_typescript_repro` are also acceptable.
+6. For an existing Node inspector listener, run `npx -y github:illscience/vibe-debug attach-typescript --port <port> --break <file.ts>:<line> --json`.
+7. Inspect the stopped location, locals, and evaluations.
+8. Use `--eval` only for read-style expressions; it can execute code in the debuggee.
+9. If an MCP server named `vibe-debug` is installed, `debug_python_repro` and `debug_typescript_repro` are also acceptable.
 
 Always tell the user when and how you are using the debugger: before running it, state the mode, target script/test/request or attach port, and breakpoint; after it stops, state the stopped file, line, function, and observed values that matter. If you skip the debugger for runnable Python or TypeScript behavior, briefly state why.
 

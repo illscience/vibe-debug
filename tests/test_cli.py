@@ -118,6 +118,7 @@ class CLITests(unittest.TestCase):
             self.assertIn("stopped file, line, function", contents)
             self.assertIn("debug-python <script.py>", contents)
             self.assertIn("debug-typescript <script.ts>", contents)
+            self.assertIn("attach-typescript --port", contents)
             self.assertIn("--break <file.py>:<line>", contents)
             self.assertIn("--json", contents)
 
@@ -218,6 +219,81 @@ class CLITests(unittest.TestCase):
         self.assertEqual(locals_by_name["price"], "120")
         self.assertEqual(locals_by_name["rate"], "0.15")
         self.assertEqual(locals_by_name["discount"], "18")
+        self.assertEqual(locals_by_name["finalTotal"], "102")
+        evaluations = {item["expression"]: item["result"] for item in payload["evaluations"]}
+        self.assertEqual(evaluations["finalTotal"], "102")
+
+    @unittest.skipUnless(node_supports_type_stripping(), "node cannot execute TypeScript directly")
+    def test_attach_typescript_attaches_to_node_inspector_and_prints_locals(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            node = shutil.which("node")
+            self.assertIsNotNone(node)
+            port = free_port()
+            script = Path(directory) / "attach_sample.ts"
+            script.write_text(
+                "\n".join(
+                    [
+                        "function calculateTotal(price: number, rate: number): number {",
+                        "    const discount = price * rate;",
+                        "    const finalTotal = price - discount;",
+                        "    console.log(finalTotal); // BREAK_ATTACH_TS",
+                        "    return finalTotal;",
+                        "}",
+                        "",
+                        "calculateTotal(120, 0.15);",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            breakpoint_line = line_with(script, "BREAK_ATTACH_TS")
+            target = subprocess.Popen(
+                [
+                    str(node),
+                    f"--inspect-brk=127.0.0.1:{port}",
+                    str(script),
+                ],
+                cwd=directory,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                code, output = call_cli(
+                    [
+                        "attach-typescript",
+                        "--host",
+                        "127.0.0.1",
+                        "--port",
+                        str(port),
+                        "--break",
+                        f"{script}:{breakpoint_line}",
+                        "--eval",
+                        "finalTotal",
+                        "--json",
+                        "--timeout",
+                        "20",
+                    ]
+                )
+            finally:
+                if target.poll() is None:
+                    target.terminate()
+                    try:
+                        target.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        target.kill()
+                        target.wait(timeout=5)
+
+        self.assertEqual(code, 0, output)
+        payload = json.loads(output)
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["mode"], "attach-typescript")
+        self.assertEqual(payload["runtime"], "node")
+        self.assertEqual(payload["stopped"]["function"], "calculateTotal")
+        self.assertEqual(payload["stopped"]["line"], breakpoint_line)
+        locals_by_name = {item["name"]: item["value"] for item in payload["locals"]}
+        self.assertEqual(locals_by_name["price"], "120")
+        self.assertEqual(locals_by_name["rate"], "0.15")
         self.assertEqual(locals_by_name["finalTotal"], "102")
         evaluations = {item["expression"]: item["result"] for item in payload["evaluations"]}
         self.assertEqual(evaluations["finalTotal"], "102")

@@ -146,6 +146,29 @@ npx -y github:illscience/vibe-debug debug-typescript ./src/pricing.ts \
   --json
 ```
 
+### Attach To A Running TypeScript Process
+
+Start the process with the Node inspector. Use `--inspect-brk` when you want it to wait until the debugger attaches:
+
+```bash
+node --inspect-brk=127.0.0.1:9229 ./src/pricing.ts
+```
+
+Then attach, set breakpoints, optionally trigger work, and inspect the stopped frame:
+
+```bash
+npx -y github:illscience/vibe-debug attach-typescript \
+  --host 127.0.0.1 \
+  --port 9229 \
+  --break ./src/pricing.ts:12 \
+  --eval "finalTotal" \
+  --json
+```
+
+For an already-running local server, start it with `--inspect=127.0.0.1:9229`, then use `--trigger-url` or `--trigger-command` after breakpoints are set.
+
+By default, `attach-typescript` detaches without terminating the Node process. Pass `--terminate-debuggee` only when you intentionally want to stop the attached process.
+
 ### Debug A Local Web Request
 
 For Flask, Django, FastAPI, or another Python web app that can be launched from a script, use `debug-request`. It starts the server under `debugpy`, waits for the app to accept requests, sends the URL, stops at your breakpoint, and returns locals/evaluations:
@@ -255,6 +278,7 @@ npx -y github:illscience/vibe-debug debug-python <script.py> --break <file.py>:<
 npx -y github:illscience/vibe-debug debug-typescript <script.ts> --break <file.ts>:<line> --json
 npx -y github:illscience/vibe-debug debug-request <server.py> --url <local-url> --break <file.py>:<line> --json
 npx -y github:illscience/vibe-debug attach-python --port <debugpy-port> --break <file.py>:<line> --json
+npx -y github:illscience/vibe-debug attach-typescript --port <node-inspector-port> --break <file.ts>:<line> --json
 ```
 
 The CLI launches or attaches to a Python process under `debugpy`, or launches a TypeScript/JavaScript script under the Node inspector, stops at the requested breakpoint, and returns the stopped location, locals, and optional expression evaluations.
@@ -275,6 +299,7 @@ Debugger primitives:
 
 - `debug_launch`: launch a Python script under `debugpy`.
 - `debug_attach`: attach to an existing `debugpy` listener.
+- `debug_attach_typescript`: attach to an existing Node inspector listener.
 - `debug_set_breakpoints`: set file/line breakpoints.
 - `debug_continue`: continue until breakpoint, exception, process exit, or timeout.
 - `debug_step`: step `over`, `into`, or `out`.
@@ -298,7 +323,7 @@ If using the local venv:
 .venv/bin/python tools/runtime_proof.py
 ```
 
-The proof talks to the MCP server over stdio, launches `examples/buggy_discount.py` under `debugpy`, sets a breakpoint, continues to it, steps into and out of functions, inspects local variables, evaluates expressions in a paused frame, tests attach mode, exercises the CLI `debug-request`, `attach-python`, and `debug-typescript` workflows, and cleans up the session.
+The proof talks to the MCP server over stdio, launches `examples/buggy_discount.py` under `debugpy`, sets a breakpoint, continues to it, steps into and out of functions, inspects local variables, evaluates expressions in a paused frame, tests attach mode, exercises the CLI `debug-request`, `attach-python`, `debug-typescript`, and `attach-typescript` workflows, and cleans up the session.
 
 Expected output:
 
@@ -323,6 +348,7 @@ Expected output:
     "CLI debug-request",
     "CLI attach-python",
     "CLI debug-typescript",
+    "CLI attach-typescript",
     "MCP debug_typescript_repro"
   ],
   "bugEvidence": {
@@ -334,6 +360,7 @@ Expected output:
     "debugRequestPath": "'/wines'",
     "attachPythonDoubled": "20",
     "debugTypescriptFinalTotal": "102",
+    "attachTypescriptFinalTotal": "102",
     "debugTypescriptMcpFinalTotal": "102"
   }
 }

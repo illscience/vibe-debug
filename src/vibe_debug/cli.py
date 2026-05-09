@@ -85,6 +85,12 @@ For an already-running process that was started with `python -m debugpy --listen
 npx -y github:illscience/vibe-debug attach-python --port <port> --break <file.py>:<line> --json
 ```
 
+For an already-running Node process started with `node --inspect-brk=127.0.0.1:<port> <script.ts>` or `node --inspect=127.0.0.1:<port> <script.ts>`, use:
+
+```bash
+npx -y github:illscience/vibe-debug attach-typescript --port <port> --break <file.ts>:<line> --json
+```
+
 Pick a breakpoint at the suspicious calculation, branch, return, assertion, or exception site. If no breakpoint is known yet, run with `--stop-on-entry --json`, inspect the code, then run again with a more useful breakpoint.
 
 ## Useful Options
@@ -96,14 +102,14 @@ Pick a breakpoint at the suspicious calculation, branch, return, assertion, or e
 - `--node <path>`: with `debug-typescript`, use a specific Node executable.
 - `--node-arg "<value>"`: with `debug-typescript`, pass a Node argument before the script, such as `--import tsx`.
 - `--url "<local-url>"`: with `debug-request`, send a local HTTP request after the server starts.
-- `--trigger-url "<local-url>"`: with `attach-python`, send a local HTTP request after breakpoints are set.
+- `--trigger-url "<local-url>"`: with `attach-python` or `attach-typescript`, send a local HTTP request after breakpoints are set.
 - `--locals-limit <n>`: cap the number of locals returned.
 - `--json`: return compact machine-readable output.
 
 ## Workflow
 
 1. Find or create the smallest Python or TypeScript command, script, test, or request that exercises the behavior.
-2. Use `debug-python` for Python scripts/tests, `debug-typescript` for TypeScript/JavaScript scripts, `debug-request` for local Python web requests, or `attach-python` for an existing debugpy listener.
+2. Use `debug-python` for Python scripts/tests, `debug-typescript` for TypeScript/JavaScript scripts, `debug-request` for local Python web requests, `attach-python` for an existing debugpy listener, or `attach-typescript` for an existing Node inspector listener.
 3. Choose a breakpoint near the runtime behavior being diagnosed, verified, or implemented.
 4. Run the selected command with `--json`.
 5. Inspect `stopped`, `locals`, and `evaluations`.
@@ -787,6 +793,96 @@ def _debug_typescript(args: argparse.Namespace) -> int:
     return 0
 
 
+def _attach_typescript_payload(args: argparse.Namespace) -> dict[str, object]:
+    session: NodeDebugSession | None = None
+    trigger_thread: threading.Thread | None = None
+    trigger_result: dict[str, object] = {}
+
+    try:
+        session = NodeDebugSession.attach(
+            host=args.host,
+            port=int(args.port),
+            timeout=float(args.timeout),
+        )
+        breakpoint_results = [
+            session.set_breakpoints(file=str(item["file"]), lines=[int(item["line"])], cwd=args.cwd)
+            for item in args.breakpoints or []
+        ]
+
+        if args.trigger_url:
+            trigger_thread, trigger_result = _start_url_trigger(
+                url=args.trigger_url,
+                delay=float(args.trigger_delay),
+                timeout=float(args.trigger_timeout or args.timeout),
+            )
+        elif args.trigger_command:
+            trigger_thread, trigger_result = _start_command_trigger(
+                command=args.trigger_command,
+                cwd=args.cwd,
+                delay=float(args.trigger_delay),
+                timeout=float(args.trigger_timeout or args.timeout),
+            )
+
+        stopped = session.continue_execution(
+            timeout=float(args.timeout),
+            stop_on_entry=bool(args.stop_on_entry or not breakpoint_results),
+        )
+        snapshot, evaluations = _collect_stopped_state(
+            session=session,
+            stopped=stopped,
+            locals_limit=int(args.locals_limit),
+            expressions=args.evaluate or [],
+        )
+        if trigger_thread is not None:
+            trigger_thread.join(timeout=0.2)
+
+        return {
+            "ok": True,
+            "mode": "attach-typescript",
+            "host": args.host,
+            "port": int(args.port),
+            "runtime": "node",
+            "breakpoints": _breakpoint_summaries(breakpoint_results),
+            "stopped": _stopped_summary(stopped),
+            "locals": _local_summaries(snapshot),
+            "evaluations": evaluations,
+            "trigger": dict(trigger_result) if trigger_result else None,
+        }
+    finally:
+        if session is not None:
+            try:
+                session.stop(terminate_debuggee=bool(args.terminate_debuggee))
+            except Exception:
+                pass
+
+
+def _attach_typescript(args: argparse.Namespace) -> int:
+    try:
+        payload = _attach_typescript_payload(args)
+    except Exception as exc:
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "mode": "attach-typescript",
+                        "error": str(exc),
+                        "exceptionType": type(exc).__name__,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(f"attach-typescript failed: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        _print_debug_python_human(payload)
+    return 0
+
+
 def _debug_request_payload(args: argparse.Namespace) -> dict[str, object]:
     breakpoints = args.breakpoints or []
     session: DebugSession | None = None
@@ -1008,6 +1104,8 @@ def _format_tool_use(name: str, tool_input: object) -> str:
             return "Tool: Bash (vibe-debug debug-python)"
         if isinstance(command, str) and "vibe-debug" in command and "debug-typescript" in command:
             return "Tool: Bash (vibe-debug debug-typescript)"
+        if isinstance(command, str) and "vibe-debug" in command and "attach-typescript" in command:
+            return "Tool: Bash (vibe-debug attach-typescript)"
         description = tool_input.get("description")
         if isinstance(description, str) and description:
             return f"Tool: Bash ({description})"
@@ -1315,6 +1413,38 @@ def main(argv: list[str] | None = None) -> int:
     debug_typescript.add_argument("--stop-on-entry", action="store_true")
     debug_typescript.add_argument("--eval", dest="evaluate", action="append", default=[], help="Evaluate expression at stop.")
     debug_typescript.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+    attach_typescript = subparsers.add_parser(
+        "attach-typescript",
+        aliases=["attach-ts"],
+        help="Attach to an existing Node inspector listener, set breakpoints, optionally trigger work, and inspect state.",
+    )
+    attach_typescript.add_argument("--host", default="127.0.0.1", help="Node inspector host.")
+    attach_typescript.add_argument("--port", type=int, required=True, help="Node inspector port.")
+    attach_typescript.add_argument(
+        "--break",
+        "-b",
+        dest="breakpoints",
+        action="append",
+        type=_parse_breakpoint,
+        default=[],
+        metavar="FILE:LINE",
+        help="Set a line breakpoint before continuing. Repeat for multiple breakpoints.",
+    )
+    attach_typescript.add_argument("--cwd", help="Base directory for resolving relative breakpoint paths.")
+    attach_typescript.add_argument("--trigger-url", help="URL to request after breakpoints are set.")
+    attach_typescript.add_argument("--trigger-command", help="Command to run after breakpoints are set.")
+    attach_typescript.add_argument("--trigger-timeout", type=float, help="Timeout for trigger work. Defaults to --timeout.")
+    attach_typescript.add_argument("--trigger-delay", type=float, default=0.0)
+    attach_typescript.add_argument("--timeout", type=float, default=20.0)
+    attach_typescript.add_argument("--locals-limit", type=int, default=40)
+    attach_typescript.add_argument("--stop-on-entry", action="store_true")
+    attach_typescript.add_argument("--eval", dest="evaluate", action="append", default=[], help="Evaluate expression at stop.")
+    attach_typescript.add_argument(
+        "--terminate-debuggee",
+        action="store_true",
+        help="Terminate the attached Node process on disconnect. By default attach detaches without terminating it.",
+    )
+    attach_typescript.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
     debug_request = subparsers.add_parser(
         "debug-request",
         help="Launch a Python web app under the debugger, trigger a local URL, and print stopped-frame state.",
@@ -1417,6 +1547,8 @@ def main(argv: list[str] | None = None) -> int:
         return _debug_python(args)
     if args.command in {"debug-typescript", "debug-ts"}:
         return _debug_typescript(args)
+    if args.command in {"attach-typescript", "attach-ts"}:
+        return _attach_typescript(args)
     if args.command == "debug-request":
         return _debug_request(args)
     if args.command == "attach-python":

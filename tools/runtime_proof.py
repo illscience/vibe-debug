@@ -180,6 +180,7 @@ def main() -> int:
             "debug_typescript_repro",
             "debug_launch",
             "debug_attach",
+            "debug_attach_typescript",
             "debug_set_breakpoints",
             "debug_continue",
             "debug_step",
@@ -509,6 +510,52 @@ def main() -> int:
                 assert ts_cli_evals["finalTotal"] == "102", ts_cli
                 typescript_proved.append("CLI debug-typescript")
                 typescript_evidence["debugTypescriptFinalTotal"] = ts_cli_evals["finalTotal"]
+
+                node = shutil.which("node")
+                assert node is not None
+                attach_ts_port = free_port()
+                attach_ts_process = subprocess.Popen(
+                    [
+                        node,
+                        f"--inspect-brk=127.0.0.1:{attach_ts_port}",
+                        str(ts_target),
+                    ],
+                    cwd=proof_root,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                try:
+                    attach_ts = run_cli(
+                        [
+                            "attach-typescript",
+                            "--host",
+                            "127.0.0.1",
+                            "--port",
+                            str(attach_ts_port),
+                            "--break",
+                            f"{ts_target}:{ts_line}",
+                            "--eval",
+                            "finalTotal",
+                            "--json",
+                            "--timeout",
+                            "20",
+                        ]
+                    )
+                    assert attach_ts["stopped"]["state"] == "stopped", attach_ts
+                    assert attach_ts["stopped"]["function"] == "calculateTotal", attach_ts
+                    attach_ts_evals = {item["expression"]: item["result"] for item in attach_ts["evaluations"]}
+                    assert attach_ts_evals["finalTotal"] == "102", attach_ts
+                    typescript_proved.append("CLI attach-typescript")
+                    typescript_evidence["attachTypescriptFinalTotal"] = attach_ts_evals["finalTotal"]
+                finally:
+                    if attach_ts_process.poll() is None:
+                        attach_ts_process.terminate()
+                        try:
+                            attach_ts_process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            attach_ts_process.kill()
+                            attach_ts_process.wait(timeout=5)
 
                 ts_mcp = client.call_tool(
                     "debug_typescript_repro",

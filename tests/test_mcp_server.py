@@ -25,6 +25,7 @@ class MCPServerTests(unittest.TestCase):
         self.assertIn("debug_python_repro", tools)
         self.assertIn("debug_typescript_repro", tools)
         self.assertIn("debug_launch", tools)
+        self.assertIn("debug_attach_typescript", tools)
         self.assertIn("debug_set_breakpoints", tools)
         self.assertIn("debug_step", tools)
         self.assertIn("debug_variables", tools)
